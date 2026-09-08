@@ -1,0 +1,6 @@
+{
+  "enableTelemetry": false,
+  "trustedWorkspaces": [
+    "/agy"
+  ]
+}
