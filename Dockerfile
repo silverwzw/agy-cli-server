@@ -9,11 +9,11 @@ RUN \
 RUN curl -fsSL https://antigravity.google/cli/install.sh | /bin/bash
 
 RUN \
-  apt-get install -y poppler-utils curl iputils-ping jq moreutils wget
+  apt-get install -y poppler-utils iputils-ping jq moreutils wget
 
 WORKDIR /webterm
 
-RUN npm i @xterm/xterm node-pty socket.io
+RUN npm i @xterm/xterm @xterm/addon-fit @xterm/addon-clipboard @xterm/addon-web-links node-pty socket.io
 
 RUN jq '.scripts = { start: "node server/index.js" }' package.json | sponge package.json
 

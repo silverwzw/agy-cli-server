@@ -7,7 +7,10 @@ const fs = require("fs");
 
 // TODO: auto-sizing
 // TODO: multi-session
+// TODO: process.on('SIGTERM') / process.on('SIGINT')
+// TODO: upload / download
 // TODO: voice
+// TODO: openssh-server
 
 const shell = "/bin/bash";
 const agy = "agy --dangerously-skip-permissions";
@@ -29,10 +32,19 @@ const server = http.createServer((req, res) => {
   } else if (urlPath === "/static/app.js") {
     filePath = path.join(ROOT_DIR, "app", "app.js");
     mime = "application/javascript";
-  } else if (urlPath.startsWith("/static/xterm.js")) {
+  } else if (urlPath === "/static/xterm.js") {
     filePath = path.join(ROOT_DIR, "node_modules/@xterm/xterm/lib/xterm.js");
     mime = "application/javascript";
-  } else if (urlPath.startsWith("/static/xterm.css")) {
+  } else if (urlPath === "/static/xterm-clipboard.js") {
+    filePath = path.join(ROOT_DIR, "node_modules/@xterm/addon-clipboard/lib/addon-clipboard.js");
+    mime = "application/javascript";
+  } else if (urlPath === "/static/xterm-fit.js") {
+    filePath = path.join(ROOT_DIR, "node_modules/@xterm/addon-fit/lib/addon-fit.js");
+    mime = "application/javascript";
+  } else if (urlPath === "/static/xterm-weblinks.js") {
+    filePath = path.join(ROOT_DIR, "node_modules/@xterm/addon-web-link/lib/addon-web-link.js");
+    mime = "application/javascript";
+  } else if (urlPath === "/static/xterm.css") {
     filePath = path.join(ROOT_DIR, "node_modules/@xterm/xterm/css/xterm.css");
     mime = "text/css";
   } else {
@@ -42,7 +54,7 @@ const server = http.createServer((req, res) => {
 
   fs.stat(filePath, (err, stats) => {
     if (err || !stats.isFile()) {
-      res.writeHead(500, { "Content-Type": "text/plain" });
+      res.writeHead(404, { "Content-Type": "text/plain" });
       return res.end("File not found.");
     }
 
@@ -52,12 +64,10 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const ws = socket(server, {
-  cors: { origin: "*" },
-});
+const ws = socket(server);
 
 ws.on("connection", (socket) => {
-  var ptyProcess = pty.spawn(shell, [], {
+  const ptyProcess = pty.spawn(shell, [], {
     name: "xterm-color",
     cols: 80,
     rows: 30,
@@ -66,12 +76,23 @@ ws.on("connection", (socket) => {
   });
 
   ptyProcess.on("data", function (data) {
-    ws.emit("t.incomingData", data);
+    ws.emit("t.s2c", data);
   });
 
-  socket.on("t.keystroke", (data) => {
+  socket.on("t.c2s", (data) => {
     ptyProcess.write(data);
   });
+
+  socket.on("t.resize", ({ cols, rows }) => {
+    if (cols && rows) {
+      try {
+        ptyProcess.resize(cols, rows);
+      } catch (err) {
+        console.error("pty resize error:", err);
+      }
+    }
+  });
+
 });
 
-server.listen(8443, () => console.log("listening on http://localhost:8443"));
+server.listen(8443, () => console.log("listening on http://0.0.0.0:8443"));
