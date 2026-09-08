@@ -9,6 +9,11 @@ const term = new Terminal();
 const addon_fit = new FitAddon.FitAddon();
 term.loadAddon(addon_fit);
 
+const addon_clipboard = new ClipboardAddon.ClipboardAddon();
+term.loadAddon(addon_clipboard);
+
+term.loadAddon(new WebLinksAddon.WebLinksAddon());
+
 term.open(term_div);
 addon_fit.fit();
 

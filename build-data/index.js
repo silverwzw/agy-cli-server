@@ -1,16 +1,16 @@
 const http = require("http");
 const pty = require("node-pty");
-const os = require("os");
 const socket = require("socket.io");
 const path = require("path");
 const fs = require("fs");
 
-// TODO: auto-sizing
 // TODO: multi-session
 // TODO: process.on('SIGTERM') / process.on('SIGINT')
 // TODO: upload / download
-// TODO: voice
-// TODO: openssh-server
+// TODO: voice input
+// TODO: overlay
+// TODO: use express
+// TODO: mobile adapt
 
 const shell = "/bin/bash";
 const agy = "agy --dangerously-skip-permissions";
@@ -22,11 +22,17 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === "DELETE" || req.method === "HEAD") {
+    res.writeHead(405, { "Content-Type": "text/plain" });
+    return res.end("Unsupported method.");
+  }
+
   const urlPath = req.url.split("?")[0];
   let filePath;
   let mime;
+  let cache = false;
 
-  if (urlPath === "/" || urlPath === "/index.html") {
+  if (urlPath === "/") {
     filePath = path.join(ROOT_DIR, "app", "index.html");
     mime = "text/html";
   } else if (urlPath === "/static/app.js") {
@@ -35,18 +41,23 @@ const server = http.createServer((req, res) => {
   } else if (urlPath === "/static/xterm.js") {
     filePath = path.join(ROOT_DIR, "node_modules/@xterm/xterm/lib/xterm.js");
     mime = "application/javascript";
+	cache = true;
   } else if (urlPath === "/static/xterm-clipboard.js") {
     filePath = path.join(ROOT_DIR, "node_modules/@xterm/addon-clipboard/lib/addon-clipboard.js");
     mime = "application/javascript";
+	cache = true;
   } else if (urlPath === "/static/xterm-fit.js") {
     filePath = path.join(ROOT_DIR, "node_modules/@xterm/addon-fit/lib/addon-fit.js");
     mime = "application/javascript";
+	cache = true;
   } else if (urlPath === "/static/xterm-weblinks.js") {
-    filePath = path.join(ROOT_DIR, "node_modules/@xterm/addon-web-link/lib/addon-web-link.js");
+    filePath = path.join(ROOT_DIR, "node_modules/@xterm/addon-web-links/lib/addon-web-links.js");
     mime = "application/javascript";
+	cache = true;
   } else if (urlPath === "/static/xterm.css") {
     filePath = path.join(ROOT_DIR, "node_modules/@xterm/xterm/css/xterm.css");
     mime = "text/css";
+	cache = true;
   } else {
     res.writeHead(404, { "Content-Type": "text/plain" });
     return res.end("Not Found");
@@ -58,8 +69,10 @@ const server = http.createServer((req, res) => {
       return res.end("File not found.");
     }
 
-    const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, { "Content-Type": mime || "application/octet-stream" });
+    res.writeHead(200, {
+		"Content-Type": mime,
+		"Cache-Control": cache ? "public, max-age=36000" : "no-cache"
+    });
     fs.createReadStream(filePath).pipe(res);
   });
 });
