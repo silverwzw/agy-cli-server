@@ -12,13 +12,16 @@ WORKDIR /webterm
 
 RUN npm i \
       @xterm/xterm \
-	  @xterm/addon-fit \
-	  @xterm/addon-clipboard \
-	  @xterm/addon-web-links \
-	  node-pty \
-	  socket.io 
+      @xterm/addon-fit \
+      @xterm/addon-clipboard \
+      @xterm/addon-web-links \
+      node-pty \
+      express \
+      socket.io 
 
 RUN jq '.scripts = { start: "node server/entry.js" }' package.json | sponge package.json
+
+RUN apt-get install -y procps
 
 COPY ./build-data/server.js       /webterm/server/entry.js
 COPY ./build-data/index.html      /webterm/client/index.html
@@ -27,7 +30,7 @@ COPY ./build-data/init            /init
 COPY ./build-data/settings.json   /root/.gemini/antigravity-cli/settings.json
 
 RUN chmod u+x /init && \
-    echo 'alias agy-full="agy --dangerously-skip-permissions"' >> /root/.bashrc
+    echo 'alias agy="/root/.local/bin/agy --dangerously-skip-permissions"' >> /root/.bashrc
 
 # RUN apt-get clean
 
@@ -37,3 +40,5 @@ EXPOSE 8443 8080
 WORKDIR /agy
 
 CMD ["/init"]
+
+# vim: set list listchars=trail\:· sw=4 ts=4 expandtab:

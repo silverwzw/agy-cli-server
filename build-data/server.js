@@ -1,86 +1,92 @@
+const express = require("express");
 const http = require("http");
+const path = require("path");
 const pty = require("node-pty");
 const socket = require("socket.io");
-const path = require("path");
-const fs = require("fs");
 
 // TODO: multi-session
 // TODO: process.on('SIGTERM') / process.on('SIGINT')
 // TODO: upload / download
 // TODO: voice input
 // TODO: overlay
-// TODO: use express
 // TODO: mobile adapt
 
-const shell = "/bin/bash";
-const agy = "agy --dangerously-skip-permissions";
+// =======================================================
+//                    Global Constants
+// =======================================================
+
+const SHELL = "/bin/bash";
+const AGY = "agy --dangerously-skip-permissions";
 const ROOT_DIR = path.join(__dirname, "..");
+const ROUTING_TABLE = {
+    "/": {
+        path: "client/index.html",
+        cache: false
+    },
+    "/static/main.js": {
+        path: "client/main.js",
+        cache: false
+    },
+    "/static/xterm.js": {
+        path: "node_modules/@xterm/xterm/lib/xterm.js",
+        cache: true
+    },
+    "/static/xterm-clipboard.js": {
+        path: "node_modules/@xterm/addon-clipboard/lib/addon-clipboard.js",
+        cache: true
+    },
+    "/static/xterm-fit.js": {
+        path: "node_modules/@xterm/addon-fit/lib/addon-fit.js",
+        cache: true
+    },
+    "/static/xterm-weblinks.js": {
+        path: "node_modules/@xterm/addon-web-links/lib/addon-web-links.js",
+        cache: true
+    },
+    "/static/xterm.css": {
+        path: "node_modules/@xterm/xterm/css/xterm.css",
+        cache: true
+    },
+};
 
-const server = http.createServer((req, res) => {
-  // Let Socket.IO handle /socket.io requests
-  if (req.url.startsWith("/socket.io")) {
-    return;
-  }
+// =======================================================
+//                     HTTP Setup
+// =======================================================
 
-  if (req.method === "DELETE" || req.method === "HEAD") {
-    res.writeHead(405, { "Content-Type": "text/plain" });
-    return res.end("Unsupported method.");
-  }
+const handler = express();
+const server = http.createServer(handler);
 
-  const urlPath = req.url.split("?")[0];
-  let filePath;
-  let mime;
-  let cache = false;
-
-  if (urlPath === "/") {
-    filePath = path.join(ROOT_DIR, "client", "index.html");
-    mime = "text/html";
-  } else if (urlPath === "/static/main.js") {
-    filePath = path.join(ROOT_DIR, "client", "main.js");
-    mime = "application/javascript";
-  } else if (urlPath === "/static/xterm.js") {
-    filePath = path.join(ROOT_DIR, "node_modules/@xterm/xterm/lib/xterm.js");
-    mime = "application/javascript";
-	cache = true;
-  } else if (urlPath === "/static/xterm-clipboard.js") {
-    filePath = path.join(ROOT_DIR, "node_modules/@xterm/addon-clipboard/lib/addon-clipboard.js");
-    mime = "application/javascript";
-	cache = true;
-  } else if (urlPath === "/static/xterm-fit.js") {
-    filePath = path.join(ROOT_DIR, "node_modules/@xterm/addon-fit/lib/addon-fit.js");
-    mime = "application/javascript";
-	cache = true;
-  } else if (urlPath === "/static/xterm-weblinks.js") {
-    filePath = path.join(ROOT_DIR, "node_modules/@xterm/addon-web-links/lib/addon-web-links.js");
-    mime = "application/javascript";
-	cache = true;
-  } else if (urlPath === "/static/xterm.css") {
-    filePath = path.join(ROOT_DIR, "node_modules/@xterm/xterm/css/xterm.css");
-    mime = "text/css";
-	cache = true;
-  } else {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    return res.end("Not Found");
-  }
-
-  fs.stat(filePath, (err, stats) => {
-    if (err || !stats.isFile()) {
-      res.writeHead(404, { "Content-Type": "text/plain" });
-      return res.end("File not found.");
+for (const request_path in ROUTING_TABLE) {
+  const { path: resource_path, cache } = ROUTING_TABLE[request_path];
+  handler.get(request_path, (req, res) => {
+    if (req.method !== "GET") {
+      return res.status(405).type("text/plain").send(`Unsupported method ${req.method}`);
     }
-
-    res.writeHead(200, {
-		"Content-Type": mime,
-		"Cache-Control": cache ? "public, max-age=36000" : "no-cache"
-    });
-    fs.createReadStream(filePath).pipe(res);
+    if (!cache) {
+      res.set("Cache-Control", "no-cache");
+      res.sendFile(path.join(ROOT_DIR, resource_path));
+    } else {
+      res.sendFile(path.join(ROOT_DIR, resource_path), {
+        maxAge: 10 * 3600 * 1000,
+        immutable: false
+      });
+    }
   });
+}
+
+handler.use((req, res) => {
+  res.status(404).type("text/plain").send("Not Found");
 });
+
+
+// =======================================================
+//                   WebSocket Setup
+// =======================================================
 
 const ws = socket(server);
 
 ws.on("connection", (socket) => {
-  const ptyProcess = pty.spawn(shell, [], {
+  const ptyProcess = pty.spawn(SHELL, [], {
     name: "xterm-color",
     cols: 80,
     rows: 30,
@@ -108,4 +114,11 @@ ws.on("connection", (socket) => {
 
 });
 
+
+// =======================================================
+//                     Start Server
+// =======================================================
+
 server.listen(8443, () => console.log("listening on http://0.0.0.0:8443"));
+
+// vim: set nu list listchars=trail\:· sw=4 ts=4 expandtab:
