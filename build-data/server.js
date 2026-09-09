@@ -33,10 +33,10 @@ const server = http.createServer((req, res) => {
   let cache = false;
 
   if (urlPath === "/") {
-    filePath = path.join(ROOT_DIR, "app", "index.html");
+    filePath = path.join(ROOT_DIR, "client", "index.html");
     mime = "text/html";
-  } else if (urlPath === "/static/app.js") {
-    filePath = path.join(ROOT_DIR, "app", "app.js");
+  } else if (urlPath === "/static/main.js") {
+    filePath = path.join(ROOT_DIR, "client", "main.js");
     mime = "application/javascript";
   } else if (urlPath === "/static/xterm.js") {
     filePath = path.join(ROOT_DIR, "node_modules/@xterm/xterm/lib/xterm.js");
