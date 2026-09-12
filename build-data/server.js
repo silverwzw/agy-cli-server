@@ -6,8 +6,8 @@ const socket = require("socket.io");
 const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
+const { exec } = require("child_process");
 
-// TODO: process.on('SIGTERM') / process.on('SIGINT')
 // TODO: upload / download
 // TODO: voice input
 // TODO: overlay
@@ -82,6 +82,24 @@ function resolveStaticPath(relPath) {
   return p1;
 }
 
+function killProcessTree(pid) {
+  if (!pid || pid <= 1 || pid === process.pid) return;
+
+  exec(
+    `pkill -TERM -s ${pid} 2>/dev/null ; pkill -HUP -s ${pid} 2>/dev/null ; pkill -TERM -P ${pid} 2>/dev/null ; kill -HUP ${pid} 2>/dev/null ; kill -TERM ${pid} 2>/dev/null`,
+    () => {}
+  );
+
+  setTimeout(() => {
+    exec(
+      `pgrep -s ${pid} >/dev/null 2>&1 && pkill -9 -s ${pid} 2>/dev/null ; ` +
+      `pgrep -P ${pid} >/dev/null 2>&1 && pkill -9 -P ${pid} 2>/dev/null ; ` +
+      `kill -0 ${pid} 2>/dev/null && kill -9 ${pid} 2>/dev/null`,
+      () => {}
+    );
+  }, 1000).unref();
+}
+
 class Session {
   static lastResizeErrorLogTime = 0;
 
@@ -94,7 +112,7 @@ class Session {
     this.createdAt = new Date();
     this.clients = new Set();
     this.buffer = "";
-    this.maxBufferLength = 64 * 1024;
+    this.maxBufferLength = 256 * 1024;
     this.ptyProcess = null;
     this.exited = false;
     this.exitCode = null;
@@ -167,6 +185,16 @@ class Session {
       }
     }
   }
+
+  abort() {
+    this.exited = true;
+    if (this.ptyProcess && this.ptyProcess.pid) {
+      killProcessTree(this.ptyProcess.pid);
+    }
+    const abortMsg = "\r\n\x1b[31m[Session aborted]\x1b[0m\r\n";
+    this.appendBuffer(abortMsg);
+    ws.to(`session:${this.name}`).emit("t.s2c", abortMsg);
+  }
 }
 
 function generateSessionName() {
@@ -231,6 +259,25 @@ handler.all(["/control/list", "/control/list/"], (req, res) => {
 
   res.set("Cache-Control", "no-cache");
   res.type("json").send(JSON.stringify(sessionList, null, 2) + "\n");
+});
+
+// 9. Abort session: kill pty and its child processes
+handler.all(["/control/abort/:name", "/control/abort/:name/"], (req, res) => {
+  if (req.method !== "DELETE" && req.method !== "GET") {
+    return res.status(405).type("text/plain").send(`Unsupported method ${req.method}`);
+  }
+
+  const name = String(req.params.name || "").trim();
+  const session = sessions.get(name);
+  if (!session) {
+    return res.status(404).type("text/plain").send(`Session "${name}" not found\n`);
+  }
+
+  session.abort();
+  sessions.delete(name);
+
+  res.set("Cache-Control", "no-cache");
+  res.status(200).type("json").send(JSON.stringify({ ok: true, name }, null, 2) + "\n");
 });
 
 // Redirect /, /a, /s
