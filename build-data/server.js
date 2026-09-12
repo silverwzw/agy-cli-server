@@ -54,6 +54,18 @@ const ROUTING_TABLE = {
     path: "node_modules/@xterm/addon-web-links/lib/addon-web-links.js",
     cache: true,
   },
+  "/static/xterm-image.js": {
+    path: "node_modules/@xterm/addon-image/lib/addon-image.js",
+    cache: true,
+  },
+  "/static/xterm-progress.js": {
+    path: "node_modules/@xterm/addon-progress/lib/addon-progress.js",
+    cache: true,
+  },
+  "/static/xterm-search.js": {
+    path: "node_modules/@xterm/addon-search/lib/addon-search.js",
+    cache: true,
+  },
   "/static/xterm.css": {
     path: "node_modules/@xterm/xterm/css/xterm.css",
     cache: true,
@@ -73,6 +85,7 @@ const ws = socket(server);
 // =======================================================
 
 const sessions = new Map();
+const cleanedSessions = new Set();
 
 function resolveStaticPath(relPath) {
   const p1 = path.join(ROOT_DIR, relPath);
@@ -114,10 +127,15 @@ class Session {
     this.buffer = "";
     this.maxBufferLength = 256 * 1024;
     this.ptyProcess = null;
-    this.exited = false;
+    this.aborted = false;
+    this.cleanedUp = false;
     this.exitCode = null;
 
     this.spawnPty();
+  }
+
+  get exited() {
+    return this.exitCode !== null;
   }
 
   spawnPty() {
@@ -145,8 +163,11 @@ class Session {
 
       this.ptyProcess.on("exit", (code, signal) => {
         console.log(`Session [${this.name}] exited (code: ${code}, signal: ${signal})`);
-        this.exited = true;
         this.exitCode = code;
+        if (this.aborted || this.cleanedUp) {
+          return;
+        }
+        this.cleanup("\r\n\x1b[31m[Session exited]\x1b[0m\r\n");
       });
     } catch (err) {
       console.error(`Failed to spawn pty for session [${this.name}]:`, err);
@@ -186,14 +207,29 @@ class Session {
     }
   }
 
-  abort() {
-    this.exited = true;
+  cleanup(msg) {
+    if (this.cleanedUp) return;
+    this.cleanedUp = true;
+    if (this.exitCode === null) {
+      this.exitCode = -1;
+    }
+
     if (this.ptyProcess && this.ptyProcess.pid) {
       killProcessTree(this.ptyProcess.pid);
     }
-    const abortMsg = "\r\n\x1b[31m[Session aborted]\x1b[0m\r\n";
-    this.appendBuffer(abortMsg);
-    ws.to(`session:${this.name}`).emit("t.s2c", abortMsg);
+    if (msg) {
+      this.appendBuffer(msg);
+      ws.to(`session:${this.name}`).emit("t.s2c", msg);
+    }
+    sessions.delete(this.name);
+    cleanedSessions.add(this.name);
+  }
+
+  abort() {
+    if (this.cleanedUp) return;
+    this.aborted = true;
+    this.cleanup("\r\n\x1b[31m[Session aborted]\x1b[0m\r\n");
+    ws.to(`session:${this.name}`).emit("s.aborted", { name: this.name });
   }
 }
 
@@ -201,11 +237,14 @@ function generateSessionName() {
   let name;
   do {
     name = crypto.randomBytes(4).toString("hex");
-  } while (sessions.has(name));
+  } while (sessions.has(name) || cleanedSessions.has(name));
   return name;
 }
 
 function getOrCreateSession(name, mode) {
+  if (cleanedSessions.has(name)) {
+    return null;
+  }
   if (sessions.has(name)) {
     return sessions.get(name);
   }
@@ -270,11 +309,15 @@ handler.all(["/control/abort/:name", "/control/abort/:name/"], (req, res) => {
   const name = String(req.params.name || "").trim();
   const session = sessions.get(name);
   if (!session) {
+    if (cleanedSessions.has(name)) {
+      return res.status(410).type("text/plain").send(`Session "${name}" has been cleaned up\n`);
+    }
     return res.status(404).type("text/plain").send(`Session "${name}" not found\n`);
   }
 
   session.abort();
   sessions.delete(name);
+  cleanedSessions.add(name);
 
   res.set("Cache-Control", "no-cache");
   res.status(200).type("json").send(JSON.stringify({ ok: true, name }, null, 2) + "\n");
@@ -292,6 +335,9 @@ handler.get(["/a/:name", "/s/:name"], (req, res) => {
   const name = String(req.params.name || "").trim();
   if (!name) {
     return res.redirect(`/${mode}/${generateSessionName()}`);
+  }
+  if (cleanedSessions.has(name)) {
+    return res.status(410).type("text/plain").send(`Session "${name}" has been cleaned up\n`);
   }
   getOrCreateSession(name, mode);
   res.set("Cache-Control", "no-cache");
@@ -313,6 +359,9 @@ ws.use((socket, next) => {
   if (!sessionName || !sessionMode) {
     return next(new Error("Missing session name or mode in socket query"));
   }
+  if (cleanedSessions.has(sessionName)) {
+    return next(new Error(`Session "${sessionName}" has been cleaned up`));
+  }
   next();
 });
 
@@ -322,6 +371,12 @@ ws.on("connection", (socket) => {
 
   if (!sessionName || !sessionMode) {
     socket.emit("error", "Missing session name or mode in socket query");
+    socket.disconnect(true);
+    return;
+  }
+
+  if (cleanedSessions.has(sessionName)) {
+    socket.emit("error", `Session "${sessionName}" has been cleaned up`);
     socket.disconnect(true);
     return;
   }

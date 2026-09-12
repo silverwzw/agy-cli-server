@@ -15,6 +15,9 @@ RUN npm i \
       @xterm/addon-fit \
       @xterm/addon-clipboard \
       @xterm/addon-web-links \
+      @xterm/addon-image \
+      @xterm/addon-progress \
+      @xterm/addon-search \
       node-pty \
       express \
       socket.io 
