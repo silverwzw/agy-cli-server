@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File Upload - Web Terminal</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #0f172a;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px;
+    }
+    .header {
+      width: 100%;
+      max-width: 640px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .nav-links a {
+      color: #38bdf8;
+      text-decoration: none;
+      font-size: 14px;
+      margin-left: 12px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      background: #1e293b;
+      transition: background 0.2s;
+    }
+    .nav-links a:hover {
+      background: #334155;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      width: 100%;
+      max-width: 640px;
+      padding: 24px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: #94a3b8;
+      margin-bottom: 6px;
+    }
+    .form-group input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      color: #f8fafc;
+      font-family: monospace;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-group input[type="text"]:focus {
+      border-color: #38bdf8;
+    }
+    .drop-zone {
+      border: 2px dashed #475569;
+      border-radius: 8px;
+      padding: 32px 20px;
+      text-align: center;
+      cursor: pointer;
+      background: #0f172a;
+      transition: all 0.2s ease;
+      margin-bottom: 20px;
+    }
+    .drop-zone.dragover {
+      border-color: #38bdf8;
+      background: #1e293b;
+    }
+    .drop-zone-icon {
+      font-size: 36px;
+      margin-bottom: 8px;
+      color: #94a3b8;
+    }
+    .drop-zone-text {
+      font-size: 14px;
+      color: #cbd5e1;
+    }
+    .drop-zone-subtext {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+    .file-info {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    .file-info-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .file-info-row:last-child { margin-bottom: 0; }
+    .file-info-label { color: #94a3b8; }
+    .file-info-val { color: #f8fafc; font-family: monospace; }
+    .btn-upload {
+      width: 100%;
+      padding: 12px;
+      background: #0284c7;
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-upload:hover:not(:disabled) {
+      background: #0369a1;
+    }
+    .btn-upload:disabled {
+      background: #475569;
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+    .progress-container {
+      margin-top: 20px;
+      display: none;
+    }
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      margin-bottom: 6px;
+      color: #94a3b8;
+    }
+    .progress-bar-bg {
+      width: 100%;
+      height: 8px;
+      background: #0f172a;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: #38bdf8;
+      transition: width 0.1s ease;
+    }
+    .result-box {
+      margin-top: 20px;
+      padding: 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      display: none;
+    }
+    .result-box.success {
+      background: rgba(34, 197, 94, 0.15);
+      border: 1px solid #22c55e;
+      color: #86efac;
+    }
+    .result-box.error {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid #ef4444;
+      color: #fca5a5;
+    }
+    .result-link {
+      display: inline-block;
+      margin-top: 8px;
+      color: #38bdf8;
+      text-decoration: underline;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="title">📁 File Upload</div>
+    <div class="nav-links">
+      <a href="/a">Terminal (agy)</a>
+      <a href="/s">Shell (bash)</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="form-group">
+      <label for="dest-path">Target Directory or Full File Path</label>
+      <input type="text" id="dest-path" value="/agy" placeholder="/agy or /agy/subfolder" />
+    </div>
+
+    <input type="file" id="file-input" style="display: none;" />
+
+    <div class="drop-zone" id="drop-zone">
+      <div class="drop-zone-icon">⇪</div>
+      <div class="drop-zone-text">Click or drag & drop files here to upload</div>
+      <div class="drop-zone-subtext">Uses HTTP PUT to stream files directly into the container</div>
+    </div>
+
+    <div class="file-info" id="file-info">
+      <div class="file-info-row">
+        <span class="file-info-label">Selected File:</span>
+        <span class="file-info-val" id="info-name">-</span>
+      </div>
+      <div class="file-info-row">
+        <span class="file-info-label">Size:</span>
+        <span class="file-info-val" id="info-size">-</span>
+      </div>
+      <div class="file-info-row">
+        <span class="file-info-label">Target Destination:</span>
+        <span class="file-info-val" id="info-dest">-</span>
+      </div>
+    </div>
+
+    <button type="button" class="btn-upload" id="btn-upload" disabled>Upload File (PUT)</button>
+
+    <div class="progress-container" id="progress-container">
+      <div class="progress-header">
+        <span id="progress-status">Uploading...</span>
+        <span id="progress-pct">0%</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="progress-fill"></div>
+      </div>
+    </div>
+
+    <div class="result-box" id="result-box"></div>
+  </div>
+
+  <script>
+    const dropZone = document.getElementById("drop-zone");
+    const fileInput = document.getElementById("file-input");
+    const destPathInput = document.getElementById("dest-path");
+    const fileInfo = document.getElementById("file-info");
+    const infoName = document.getElementById("info-name");
+    const infoSize = document.getElementById("info-size");
+    const infoDest = document.getElementById("info-dest");
+    const btnUpload = document.getElementById("btn-upload");
+    const progressContainer = document.getElementById("progress-container");
+    const progressFill = document.getElementById("progress-fill");
+    const progressPct = document.getElementById("progress-pct");
+    const progressStatus = document.getElementById("progress-status");
+    const resultBox = document.getElementById("result-box");
+
+    let currentFile = null;
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return "0 B";
+      const k = 1024;
+      const sizes = ["B", "KB", "MB", "GB", "TB"];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return (bytes / Math.pow(k, i)).toFixed(2) + " " + sizes[i];
+    }
+
+    function computeTargetPath() {
+      if (!currentFile) return "";
+      let dest = destPathInput.value.trim() || "/agy";
+      if (dest.endsWith("/") || !dest.includes(".")) {
+        return (dest.replace(/\\/+$/, "") + "/" + currentFile.name).replace(/\\/+/g, "/");
+      }
+      return dest;
+    }
+
+    function updatePreview() {
+      if (!currentFile) {
+        fileInfo.style.display = "none";
+        btnUpload.disabled = true;
+        return;
+      }
+      infoName.innerText = currentFile.name;
+      infoSize.innerText = formatBytes(currentFile.size);
+      infoDest.innerText = computeTargetPath();
+      fileInfo.style.display = "block";
+      btnUpload.disabled = false;
+    }
+
+    dropZone.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", (e) => {
+      if (e.target.files?.length > 0) {
+        currentFile = e.target.files[0];
+        updatePreview();
+      }
+    });
+
+    destPathInput.addEventListener("input", updatePreview);
+
+    ["dragenter", "dragover"].forEach(event => {
+      dropZone.addEventListener(event, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add("dragover");
+      });
+    });
+
+    ["dragleave", "drop"].forEach(event => {
+      dropZone.addEventListener(event, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove("dragover");
+      });
+    });
+
+    dropZone.addEventListener("drop", (e) => {
+      if (e.dataTransfer?.files?.length > 0) {
+        currentFile = e.dataTransfer.files[0];
+        updatePreview();
+      }
+    });
+
+    btnUpload.addEventListener("click", () => {
+      if (!currentFile) return;
+      const target = computeTargetPath();
+      btnUpload.disabled = true;
+      progressContainer.style.display = "block";
+      resultBox.style.display = "none";
+      progressFill.style.width = "0%";
+      progressPct.innerText = "0%";
+      progressStatus.innerText = "Uploading " + currentFile.name + "...";
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", "/control/upload?path=" + encodeURIComponent(target));
+      xhr.setRequestHeader("X-File-Path", target);
+      xhr.setRequestHeader("X-File-Name", currentFile.name);
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = ((e.loaded / e.total) * 100).toFixed(1);
+          progressFill.style.width = pct + "%";
+          progressPct.innerText = pct + "% (" + formatBytes(e.loaded) + " / " + formatBytes(e.total) + ")";
+        }
+      };
+
+      xhr.onload = () => {
+        btnUpload.disabled = false;
+        if (xhr.status >= 200 && xhr.status < 300) {
+          progressFill.style.width = "100%";
+          progressPct.innerText = "100%";
+          progressStatus.innerText = "Upload Complete!";
+          let resData = {};
+          try { resData = JSON.parse(xhr.responseText); } catch(err) {}
+          resultBox.className = "result-box success";
+          resultBox.innerHTML = "<strong>✓ Success!</strong> File uploaded to <code>" + (resData.path || target) + "</code> (" + formatBytes(currentFile.size) + ")";
+          resultBox.style.display = "block";
+        } else {
+          resultBox.className = "result-box error";
+          resultBox.innerText = "Upload failed (" + xhr.status + "): " + (xhr.responseText || "Unknown error");
+          resultBox.style.display = "block";
+        }
+      };
+
+      xhr.onerror = () => {
+        btnUpload.disabled = false;
+        resultBox.className = "result-box error";
+        resultBox.innerText = "Network error occurred during upload.";
+        resultBox.style.display = "block";
+      };
+
+      xhr.send(currentFile);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Download {{FILENAME}} - Web Terminal</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #0f172a;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px;
+    }
+    .header {
+      width: 100%;
+      max-width: 680px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .nav-links a {
+      color: #38bdf8;
+      text-decoration: none;
+      font-size: 14px;
+      margin-left: 12px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      background: #1e293b;
+      transition: background 0.2s;
+    }
+    .nav-links a:hover {
+      background: #334155;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      width: 100%;
+      max-width: 680px;
+      padding: 24px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .file-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 20px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid #334155;
+    }
+    .file-icon {
+      font-size: 40px;
+      line-height: 1;
+      color: #38bdf8;
+    }
+    .file-main {
+      flex: 1;
+      overflow: hidden;
+    }
+    .file-name {
+      font-size: 18px;
+      font-weight: 600;
+      color: #f8fafc;
+      word-break: break-all;
+      margin-bottom: 4px;
+    }
+    .file-path {
+      font-size: 13px;
+      color: #94a3b8;
+      font-family: monospace;
+      word-break: break-all;
+    }
+    .metadata-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .meta-item {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 10px 14px;
+    }
+    .meta-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #64748b;
+      margin-bottom: 4px;
+    }
+    .meta-value {
+      font-size: 13px;
+      color: #e2e8f0;
+      font-family: monospace;
+      font-weight: 500;
+    }
+    .download-status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px 14px;
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 6px;
+      font-size: 13px;
+      color: #7dd3fc;
+      margin-bottom: 24px;
+    }
+    .retry-link {
+      color: #38bdf8;
+      text-decoration: underline;
+    }
+    .commands-section {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .commands-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #f8fafc;
+      margin-bottom: 6px;
+    }
+    .commands-desc {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+    .command-group {
+      margin-bottom: 14px;
+    }
+    .command-group:last-child {
+      margin-bottom: 0;
+    }
+    .command-label {
+      font-size: 12px;
+      font-weight: 500;
+      color: #cbd5e1;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .command-box {
+      display: flex;
+      align-items: center;
+      background: #182234;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .command-code {
+      flex: 1;
+      padding: 10px 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      color: #38bdf8;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+    .btn-copy {
+      background: #1e293b;
+      border: none;
+      border-left: 1px solid #334155;
+      color: #94a3b8;
+      padding: 10px 14px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .btn-copy:hover {
+      background: #334155;
+      color: #f8fafc;
+    }
+    .btn-copy.copied {
+      background: #065f46;
+      color: #6ee7b7;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="title">📥 File Download</div>
+    <div class="nav-links">
+      <a href="/a">Terminal (agy)</a>
+      <a href="/s">Shell (bash)</a>
+      <a href="/control/upload">Upload</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="file-header">
+      <div class="file-icon">📄</div>
+      <div class="file-main">
+        <div class="file-name">{{FILENAME}}</div>
+        <div class="file-path">{{TARGET_FILE}}</div>
+      </div>
+    </div>
+
+    <div class="metadata-grid">
+      <div class="meta-item">
+        <div class="meta-label">File Size</div>
+        <div class="meta-value">{{FORMATTED_SIZE}} ({{RAW_SIZE}} bytes)</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">Permissions (Mode)</div>
+        <div class="meta-value">{{MODE_OCTAL}}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">Owner (Name)</div>
+        <div class="meta-value">{{USER_NAME}}:{{GROUP_NAME}}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">Owner (ID)</div>
+        <div class="meta-value">UID {{UID}} : GID {{GID}}</div>
+      </div>
+    </div>
+
+    <div class="download-status">
+      <span>⬇ Direct download triggered automatically...</span>
+      <span style="font-size: 12px; color: #94a3b8;">(<a href="{{DIRECT_DOWNLOAD_URL}}" class="retry-link">click here</a> if download didn't start)</span>
+    </div>
+    <iframe src="{{DIRECT_DOWNLOAD_URL}}" style="display: none;"></iframe>
+
+    <div class="commands-section">
+      <div class="commands-title">⚙️ Restore Permissions & Ownership</div>
+      <div class="commands-desc">
+        Run these commands after downloading to restore original permissions and ownership on your target system:
+      </div>
+
+      <div class="command-group">
+        <div class="command-label">
+          <span>1. Permissions (chmod)</span>
+        </div>
+        <div class="command-box">
+          <code class="command-code" id="cmd-chmod">{{CHMOD_CMD}}</code>
+          <button class="btn-copy" onclick="copyFromElement('cmd-chmod', this)">Copy</button>
+        </div>
+      </div>
+
+      <div class="command-group">
+        <div class="command-label">
+          <span>2. Ownership — Username & Group Name Version</span>
+        </div>
+        <div class="command-box">
+          <code class="command-code" id="cmd-chown-name">{{CHOWN_NAME_CMD}}</code>
+          <button class="btn-copy" onclick="copyFromElement('cmd-chown-name', this)">Copy</button>
+        </div>
+      </div>
+
+      <div class="command-group">
+        <div class="command-label">
+          <span>3. Ownership — UID & GID Version</span>
+        </div>
+        <div class="command-box">
+          <code class="command-code" id="cmd-chown-id">{{CHOWN_ID_CMD}}</code>
+          <button class="btn-copy" onclick="copyFromElement('cmd-chown-id', this)">Copy</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function copyFromElement(id, btn) {
+      const el = document.getElementById(id);
+      if (el) copyText(el.innerText, btn);
+    }
+
+    function copyText(text, btn) {
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          showCopied(btn);
+        }).catch(() => fallbackCopy(text, btn));
+      } else {
+        fallbackCopy(text, btn);
+      }
+    }
+
+    function fallbackCopy(text, btn) {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        showCopied(btn);
+      } catch (e) {
+        console.error("Copy failed", e);
+      }
+      document.body.removeChild(ta);
+    }
+
+    function showCopied(btn) {
+      const orig = btn.innerText;
+      btn.innerText = "✓ Copied!";
+      btn.classList.add("copied");
+      setTimeout(() => {
+        btn.innerText = orig;
+        btn.classList.remove("copied");
+      }, 2000);
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      const a = document.createElement("a");
+      a.href = "{{DIRECT_DOWNLOAD_URL}}";
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch(e) {}
+      }, 1000);
+    });
+  </script>
+</body>
+</html>
