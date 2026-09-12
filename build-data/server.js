@@ -116,7 +116,7 @@ function handleFileDownload(req, res, targetFile, displayPath) {
     return res.status(500).type("text/plain").send(`Error reading file status: ${err.message}\n`);
   }
 
-  const isHtmlClient = req.headers["accept"] && req.headers["accept"].includes("text/html");
+  const isHtmlClient = req.headers["accept"]?.includes("text/html");
   const ua = (req.headers["user-agent"] || "").toLowerCase();
   const isCli = ua.includes("curl") || ua.includes("wget");
   const isRaw = req.query.raw !== undefined;
@@ -467,7 +467,7 @@ function getDownloadHtml(targetFile, stat, rawUrl) {
 
   <script>
     function copyText(text, btn) {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
+      if (navigator.clipboard?.writeText) {
         navigator.clipboard.writeText(text).then(() => {
           showCopied(btn);
         }).catch(() => fallbackCopy(text, btn));
@@ -816,7 +816,7 @@ function getUploadHtml() {
 
     dropZone.addEventListener("click", () => fileInput.click());
     fileInput.addEventListener("change", (e) => {
-      if (e.target.files && e.target.files.length > 0) {
+      if (e.target.files?.length > 0) {
         currentFile = e.target.files[0];
         updatePreview();
       }
@@ -841,7 +841,7 @@ function getUploadHtml() {
     });
 
     dropZone.addEventListener("drop", (e) => {
-      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      if (e.dataTransfer?.files?.length > 0) {
         currentFile = e.dataTransfer.files[0];
         updatePreview();
       }
@@ -1021,7 +1021,7 @@ class Session {
       this.exitCode = -1;
     }
 
-    if (this.ptyProcess && this.ptyProcess.pid) {
+    if (this.ptyProcess?.pid) {
       killProcessTree(this.ptyProcess.pid);
     }
     if (msg) {
@@ -1264,8 +1264,8 @@ handler.use((req, res) => {
 // =======================================================
 
 ws.use((socket, next) => {
-  const sessionName = socket.handshake.query && socket.handshake.query.name;
-  const sessionMode = socket.handshake.query && socket.handshake.query.mode;
+  const sessionName = socket.handshake.query?.name;
+  const sessionMode = socket.handshake.query?.mode;
 
   if (!sessionName || !sessionMode) {
     return next(new Error("Missing session name or mode in socket query"));
@@ -1277,8 +1277,8 @@ ws.use((socket, next) => {
 });
 
 ws.on("connection", (socket) => {
-  const sessionName = socket.handshake.query && socket.handshake.query.name;
-  const sessionMode = socket.handshake.query && socket.handshake.query.mode;
+  const sessionName = socket.handshake.query?.name;
+  const sessionMode = socket.handshake.query?.mode;
 
   if (!sessionName || !sessionMode) {
     socket.emit("error", "Missing session name or mode in socket query");
@@ -1301,7 +1301,7 @@ ws.on("connection", (socket) => {
   session.clients.add(socket.id);
   socket.emit("s.joinSuccess", { name: session.name, mode: session.mode });
 
-  if (session.buffer && session.buffer.length > 0) {
+  if (session.buffer?.length > 0) {
     socket.emit("t.s2c", session.buffer);
   }
 

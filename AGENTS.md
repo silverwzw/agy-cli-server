@@ -1,0 +1,16 @@
+# Agent Rules
+
+## 1. Prohibition on `/webterm` Directory and Files
+- **No Modifications**: Strictly prohibit modifying, creating, editing, overwriting, or deleting any files or directories under `/webterm` and its subdirectories.
+- **No Execution**: Strictly prohibit running or executing any files, scripts, binaries, commands, or processes in `/webterm` and its subdirectories.
+
+## 2. Git Operations and VCS Restrictions
+- **Read-Only Git Allowed**: Permitted to execute read-only Git commands (such as `git status`, `git diff`, `git log`, `git show`, `git branch --list`, `git grep`, etc.).
+- **No State-Changing Commands**: Strictly prohibit executing any Git commands that modify Git state or repository history (including but not limited to `git add`, `git commit`, `git push`, `git merge`, `git rebase`, `git tag`, `git branch -d`, etc.).
+- **No Working Tree / Index Modifying Commands**: Strictly prohibit executing any Git commands that modify, reset, or checkout the working directory or staging area (including but not limited to `git checkout`, `git stash`, `git restore`, `git reset`, `git clean`, `git switch`, etc.).
+- **No Changes to `.git`**: Strictly prohibit modifying, creating, or deleting any files or directories under `.git`.
+- **No Changes to `.gitignore`**: Strictly prohibit modifying, editing, or overwriting `.gitignore`.
+
+## 3. Language Requirements for Code and Configuration Files
+- **English for Code and Configs**: All generated code, comments, docstrings, and configuration files must be written in English.
+- **Exemption for `agent_worklog/`**: Files under `agent_worklog/` are exempt and must always record the original dialogue verbatim, preserving whichever language was used in the conversation.
