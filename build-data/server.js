@@ -118,6 +118,10 @@ class Session {
       });
 
       this.ptyProcess.on("error", (err) => {
+        // On Linux, reading from the master PTY returns EIO when the slave PTY closes (process exits).
+        if (err && (err.code === "EIO" || err.errno === -5)) {
+          return;
+        }
         console.error(`Session [${this.name}] pty error:`, err);
       });
 
