@@ -12,7 +12,7 @@ const { exec } = require("child_process");
 // TODO: overlay
 // TODO: mobile adapt
 // TODO: directory download
-// TODO: multifile upload
+// multifile upload is handled via client-side batch queue to /control/upload PUT
 
 // =======================================================
 //                    Global Constants
@@ -38,6 +38,14 @@ const ENV = {
 const ROUTING_TABLE = {
   "/static/main.js": {
     path: "client/main.js",
+    cache: false,
+  },
+  "/static/upload.js": {
+    path: "client/upload.js",
+    cache: false,
+  },
+  "/static/download.js": {
+    path: "client/download.js",
     cache: false,
   },
   "/static/xterm.js": {
@@ -94,9 +102,19 @@ function resolveStaticPath(relPath) {
   if (fs.existsSync(p1)) return p1;
   if (relPath === "client/index.html") return path.join(__dirname, "index.html");
   if (relPath === "client/main.js") return path.join(__dirname, "client.js");
+  if (relPath === "client/upload.js") return path.join(__dirname, "upload.js");
+  if (relPath === "client/download.js") return path.join(__dirname, "download.js");
   if (relPath === "client/upload.html") return path.join(__dirname, "upload.html");
   if (relPath === "client/download.html") return path.join(__dirname, "download.html");
   return p1;
+}
+
+function isBuildDataFile(filePath) {
+  if (!filePath) return false;
+  const abs = path.resolve(filePath);
+  const buildDataDir = path.resolve(__dirname);
+  const clientDir = path.resolve(ROOT_DIR, "client");
+  return abs.startsWith(buildDataDir) || abs.startsWith(clientDir) || abs.includes("/build-data/");
 }
 
 function handleFileDownload(req, res, targetFile, displayPath) {
@@ -125,7 +143,6 @@ function handleFileDownload(req, res, targetFile, displayPath) {
   const wantsHtml = isHtmlClient && !isCli && !isRaw;
 
   if (wantsHtml) {
-    res.set("Cache-Control", "no-cache");
     return res.type("html").send(getDownloadHtml(targetFile, stat, req.originalUrl || req.url));
   }
 
@@ -375,9 +392,9 @@ for (const request_path in ROUTING_TABLE) {
       return res.status(405).type("text/plain").send(`Unsupported method ${req.method}`);
     }
     const resolvedPath = resolveStaticPath(resource_path);
-    if (!cache) {
+    if (!cache || isBuildDataFile(resolvedPath)) {
       res.set("Cache-Control", "no-cache");
-      res.sendFile(resolvedPath);
+      res.sendFile(resolvedPath, { cacheControl: false });
     } else {
       res.sendFile(resolvedPath, {
         maxAge: 10 * 3600 * 1000,
@@ -437,7 +454,7 @@ handler.all(["/control/abort/:name", "/control/abort/:name/"], (req, res) => {
 handler.all(["/control/upload", "/control/upload/"], (req, res) => {
   if (req.method === "GET") {
     res.set("Cache-Control", "no-cache");
-    return res.sendFile(resolveStaticPath("client/upload.html"));
+    return res.sendFile(resolveStaticPath("client/upload.html"), { cacheControl: false });
   }
 
   if (req.method === "PUT") {
@@ -555,7 +572,7 @@ handler.get(["/a/:name", "/s/:name"], (req, res) => {
   }
   getOrCreateSession(name, mode);
   res.set("Cache-Control", "no-cache");
-  res.sendFile(resolveStaticPath("client/index.html"));
+  res.sendFile(resolveStaticPath("client/index.html"), { cacheControl: false });
 });
 
 handler.use((req, res) => {

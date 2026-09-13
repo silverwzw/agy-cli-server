@@ -238,7 +238,7 @@
 
     <div class="download-status">
       <span>⬇ Direct download triggered automatically...</span>
-      <span style="font-size: 12px; color: #94a3b8;">(<a href="{{DIRECT_DOWNLOAD_URL}}" class="retry-link">click here</a> if download didn't start)</span>
+      <span style="font-size: 12px; color: #94a3b8;">(<a href="{{DIRECT_DOWNLOAD_URL}}" class="retry-link" id="direct-download-link">click here</a> if download didn't start)</span>
     </div>
     <iframe src="{{DIRECT_DOWNLOAD_URL}}" style="display: none;"></iframe>
 
@@ -280,58 +280,6 @@
     </div>
   </div>
 
-  <script>
-    function copyFromElement(id, btn) {
-      const el = document.getElementById(id);
-      if (el) copyText(el.innerText, btn);
-    }
-
-    function copyText(text, btn) {
-      if (navigator.clipboard?.writeText) {
-        navigator.clipboard.writeText(text).then(() => {
-          showCopied(btn);
-        }).catch(() => fallbackCopy(text, btn));
-      } else {
-        fallbackCopy(text, btn);
-      }
-    }
-
-    function fallbackCopy(text, btn) {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        document.execCommand("copy");
-        showCopied(btn);
-      } catch (e) {
-        console.error("Copy failed", e);
-      }
-      document.body.removeChild(ta);
-    }
-
-    function showCopied(btn) {
-      const orig = btn.innerText;
-      btn.innerText = "✓ Copied!";
-      btn.classList.add("copied");
-      setTimeout(() => {
-        btn.innerText = orig;
-        btn.classList.remove("copied");
-      }, 2000);
-    }
-
-    window.addEventListener("DOMContentLoaded", () => {
-      const a = document.createElement("a");
-      a.href = "{{DIRECT_DOWNLOAD_URL}}";
-      a.style.display = "none";
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        try { document.body.removeChild(a); } catch(e) {}
-      }, 1000);
-    });
-  </script>
+  <script defer src="/static/download.js"></script>
 </body>
 </html>

@@ -34,7 +34,9 @@ COPY ./build-data/settings.json   /root/.gemini/antigravity-cli/settings.json
 COPY ./build-data/init            /init
 COPY ./build-data/index.html      /webterm/client/index.html
 COPY ./build-data/upload.html     /webterm/client/upload.html
+COPY ./build-data/upload.js       /webterm/client/upload.js
 COPY ./build-data/download.html   /webterm/client/download.html
+COPY ./build-data/download.js     /webterm/client/download.js
 COPY ./build-data/client.js       /webterm/client/main.js
 COPY ./build-data/server.js       /webterm/server/entry.js
 
