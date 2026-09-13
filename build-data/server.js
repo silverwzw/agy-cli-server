@@ -97,25 +97,6 @@ const ws = socket(server);
 const sessions = new Map();
 const cleanedSessions = new Set();
 
-function resolveStaticPath(relPath) {
-  const p1 = path.join(ROOT_DIR, relPath);
-  if (fs.existsSync(p1)) return p1;
-  if (relPath === "client/index.html") return path.join(__dirname, "index.html");
-  if (relPath === "client/main.js") return path.join(__dirname, "client.js");
-  if (relPath === "client/upload.js") return path.join(__dirname, "upload.js");
-  if (relPath === "client/download.js") return path.join(__dirname, "download.js");
-  if (relPath === "client/upload.html") return path.join(__dirname, "upload.html");
-  if (relPath === "client/download.html") return path.join(__dirname, "download.html");
-  return p1;
-}
-
-function isBuildDataFile(filePath) {
-  if (!filePath) return false;
-  const abs = path.resolve(filePath);
-  const buildDataDir = path.resolve(__dirname);
-  const clientDir = path.resolve(ROOT_DIR, "client");
-  return abs.startsWith(buildDataDir) || abs.startsWith(clientDir) || abs.includes("/build-data/");
-}
 
 function handleFileDownload(req, res, targetFile, displayPath) {
   if (req.method !== "GET") {
@@ -202,7 +183,7 @@ function getDownloadHtml(targetFile, stat, rawUrl) {
   const cleanUrl = rawUrl.split("?")[0];
   const directDownloadUrl = `${cleanUrl}?raw`;
 
-  const templatePath = resolveStaticPath("client/download.html");
+  const templatePath = path.join(ROOT_DIR, "client/download.html");
   let template = fs.readFileSync(templatePath, "utf-8");
 
   return template
@@ -391,8 +372,8 @@ for (const request_path in ROUTING_TABLE) {
     if (req.method !== "GET") {
       return res.status(405).type("text/plain").send(`Unsupported method ${req.method}`);
     }
-    const resolvedPath = resolveStaticPath(resource_path);
-    if (!cache || isBuildDataFile(resolvedPath)) {
+    const resolvedPath = path.join(ROOT_DIR, resource_path);
+    if (!cache) {
       res.set("Cache-Control", "no-cache");
       res.sendFile(resolvedPath, { cacheControl: false });
     } else {
@@ -454,7 +435,7 @@ handler.all(["/control/abort/:name", "/control/abort/:name/"], (req, res) => {
 handler.all(["/control/upload", "/control/upload/"], (req, res) => {
   if (req.method === "GET") {
     res.set("Cache-Control", "no-cache");
-    return res.sendFile(resolveStaticPath("client/upload.html"), { cacheControl: false });
+    return res.sendFile(path.join(ROOT_DIR, "client/upload.html"), { cacheControl: false });
   }
 
   if (req.method === "PUT") {
@@ -572,7 +553,7 @@ handler.get(["/a/:name", "/s/:name"], (req, res) => {
   }
   getOrCreateSession(name, mode);
   res.set("Cache-Control", "no-cache");
-  res.sendFile(resolveStaticPath("client/index.html"), { cacheControl: false });
+  res.sendFile(path.join(ROOT_DIR, "client/index.html"), { cacheControl: false });
 });
 
 handler.use((req, res) => {

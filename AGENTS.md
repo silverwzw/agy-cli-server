@@ -14,3 +14,9 @@
 ## 3. Language Requirements for Code and Configuration Files
 - **English for Code and Configs**: All generated code, comments, docstrings, and configuration files must be written in English.
 - **Exemption for `agent_worklog/`**: Files under `agent_worklog/` are exempt and must always record the original dialogue verbatim, preserving whichever language was used in the conversation.
+
+## 4. Development and Testing Restrictions
+- **No Dev-Path Compatibility in Code**: Strictly prohibit writing code or fallback logic to accommodate the development environment (`/source`). The codebase must target the production runtime structure (`/webterm`) only.
+- **No Direct Execution in Development**: Strictly prohibit running application code directly within the development environment (`/source`).
+- **Testing via Dedicated Temporary Directory**: If code needs to be executed or tested, copy the required files to a dedicated temporary test directory mimicking the expected runtime structure.
+

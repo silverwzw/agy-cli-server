@@ -25,13 +25,14 @@ RUN npm i \
 RUN jq '.scripts = { start: "node server/entry.js" }' package.json | sponge package.json
 
 
+COPY ./build-data/init /init
+
 RUN chmod u+x /init && \
     echo 'alias agy="/root/.local/bin/agy --dangerously-skip-permissions"' >> /root/.bashrc
 
 RUN apt-get install -y procps
 
 COPY ./build-data/settings.json   /root/.gemini/antigravity-cli/settings.json
-COPY ./build-data/init            /init
 COPY ./build-data/index.html      /webterm/client/index.html
 COPY ./build-data/upload.html     /webterm/client/upload.html
 COPY ./build-data/upload.js       /webterm/client/upload.js
