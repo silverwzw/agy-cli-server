@@ -46,7 +46,7 @@ function renderFileList() {
   if (selectedFiles.length === 0) {
     fileInfo.style.display = "none";
     btnUpload.disabled = true;
-    btnUpload.innerText = "Upload Files (PUT)";
+    btnUpload.innerText = "Upload Files";
     return;
   }
 
@@ -55,13 +55,23 @@ function renderFileList() {
   summaryCount.innerText = `${selectedFiles.length} ${selectedFiles.length === 1 ? "file" : "files"}`;
   summarySize.innerText = formatBytes(totalSize);
 
+  const pendingFiles = selectedFiles.filter(item => item.status !== "done");
+
   if (!isUploading) {
-    btnUpload.disabled = false;
-    btnUpload.innerText = selectedFiles.length === 1 ? "Upload 1 File (PUT)" : `Upload ${selectedFiles.length} Files (PUT)`;
+    if (pendingFiles.length === 0) {
+      btnUpload.disabled = true;
+      btnUpload.innerText = "All Files Uploaded";
+    } else {
+      btnUpload.disabled = false;
+      btnUpload.innerText = `Upload ${pendingFiles.length} File(s)`;
+    }
   }
 
   fileList.innerHTML = selectedFiles.map((item, idx) => {
-    const target = computeTargetPath(item.file, selectedFiles.length);
+    if (item.status !== "done" || !item.target) {
+      item.target = computeTargetPath(item.file, pendingFiles.length);
+    }
+    const target = item.target;
     let badgeClass = "status-pending";
     let badgeText = "Ready";
 
@@ -110,7 +120,7 @@ function addFiles(fileListInput) {
   for (const file of newFiles) {
     const exists = selectedFiles.some(item => item.file.name === file.name && item.file.size === file.size);
     if (!exists) {
-      selectedFiles.push({ file, status: "pending", pct: 0 });
+      selectedFiles.push({ file, status: "pending", pct: 0, target: "" });
     }
   }
   renderFileList();
@@ -212,10 +222,7 @@ async function startUpload() {
   if (isUploading || selectedFiles.length === 0) return;
 
   let queue = selectedFiles.filter(item => item.status !== "done");
-  if (queue.length === 0) {
-    selectedFiles.forEach(item => { item.status = "pending"; item.pct = 0; });
-    queue = selectedFiles;
-  }
+  if (queue.length === 0) return;
 
   isUploading = true;
   btnUpload.disabled = true;
@@ -239,7 +246,8 @@ async function startUpload() {
     item.pct = 0;
     updateItemBadge(itemIdx, "uploading", "0%");
 
-    const target = computeTargetPath(item.file, selectedFiles.length);
+    const target = item.target || computeTargetPath(item.file, totalFiles);
+    item.target = target;
     progressStatus.innerText = `Uploading (${i + 1}/${totalFiles}): ${item.file.name}...`;
 
     try {
@@ -255,6 +263,7 @@ async function startUpload() {
 
       item.status = "done";
       item.pct = 100;
+      item.target = target;
       updateItemBadge(itemIdx, "success", "✓ Done");
       successCount++;
     } catch (err) {
@@ -283,7 +292,7 @@ async function startUpload() {
   if (failCount === 0) {
     resultBox.className = "result-box success";
     const countText = totalFiles === 1 ? "1 file" : `${totalFiles} files`;
-    const dest = destPathInput.value.trim() || "/agy";
+    const dest = totalFiles === 1 && queue[0]?.target ? queue[0].target : (destPathInput.value.trim() || "/agy");
     resultBox.innerHTML = `<strong>✓ Success!</strong> Successfully uploaded ${countText} (${formatBytes(totalBytes)}) to <code>${escapeHtml(dest)}</code>`;
   } else {
     resultBox.className = "result-box error";

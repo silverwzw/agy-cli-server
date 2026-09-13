@@ -12,7 +12,6 @@ const { exec } = require("child_process");
 // TODO: overlay
 // TODO: mobile adapt
 // TODO: directory download
-// multifile upload is handled via client-side batch queue to /control/upload PUT
 
 // =======================================================
 //                    Global Constants
