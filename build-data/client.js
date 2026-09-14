@@ -15,20 +15,15 @@ function showError(err) {
   term_div.style.fontFamily = "monospace";
   term_div.style.fontSize = "16px";
 
-  let msg;
-  if (err && typeof err.message === "string") {
-    msg = err.message;
-  } else if (typeof err === "string") {
-    msg = err;
-  } else {
+  let msg = err?.message || (typeof err === "string" ? err : "");
+  if (!msg && err) {
     try {
-      msg = JSON.stringify(err) ?? "Unknown error";
-    } catch (e) {
-      console.error(e);
-      msg = "unknown error, see console for details";
+      msg = JSON.stringify(err, null, 2);
+    } catch (_) {
+      msg = String(err);
     }
   }
-  term_div.innerText = msg;
+  term_div.innerText = msg || "Unknown error";
 }
 
 if (!sessionName) {
@@ -45,7 +40,9 @@ const socket = io({
   },
 });
 
-const term = new Terminal();
+const term = new Terminal({
+  allowProposedApi: true,
+});
 
 const addon_fit = new FitAddon.FitAddon();
 term.loadAddon(addon_fit);
@@ -65,13 +62,6 @@ const addon_search = new SearchAddon.SearchAddon({
   highlightLimit: 1000,
 });
 term.loadAddon(addon_search);
-
-window.term = term;
-window.addon_fit = addon_fit;
-window.addon_clipboard = addon_clipboard;
-window.addon_image = addon_image;
-window.addon_progress = addon_progress;
-window.addon_search = addon_search;
 
 term.open(term_div);
 addon_fit.fit();
@@ -113,15 +103,9 @@ let isAborted = false;
 
 socket.on("s.aborted", () => {
   isAborted = true;
-  if (term.options) {
-    term.options.disableStdin = true;
-  }
-  if (onDataHandler && onDataHandler.dispose) {
-    onDataHandler.dispose();
-  }
-  if (onResizeHandler && onResizeHandler.dispose) {
-    onResizeHandler.dispose();
-  }
+  term.options.disableStdin = true;
+  onDataHandler.dispose();
+  onResizeHandler.dispose();
 });
 
 const onDataHandler = term.onData((data) => {
@@ -206,80 +190,66 @@ const searchOptions = {
   },
 };
 
-function doSearch(reverse = false) {
-  const query = searchInput ? searchInput.value : "";
+function doSearch(reverse = false, incremental = false) {
+  const query = searchInput.value;
   if (!query) {
     addon_search.clearDecorations();
-    if (searchCount) searchCount.innerText = "";
+    searchCount.innerText = "";
     return;
   }
+  const opts = incremental ? { ...searchOptions, incremental: true } : searchOptions;
   if (reverse) {
-    addon_search.findPrevious(query, searchOptions);
+    addon_search.findPrevious(query, opts);
   } else {
-    addon_search.findNext(query, searchOptions);
+    addon_search.findNext(query, opts);
   }
 }
 
 function openSearchBar() {
-  if (!searchBar) return;
   searchBar.style.display = "flex";
-  if (searchInput) {
-    searchInput.focus();
-    searchInput.select();
-    if (searchInput.value) {
-      doSearch(false);
-    }
+  searchInput.focus();
+  searchInput.select();
+  if (searchInput.value) {
+    doSearch(false);
   }
 }
 
 function closeSearchBar() {
-  if (!searchBar) return;
   searchBar.style.display = "none";
   addon_search.clearDecorations();
   term.focus();
 }
 
 function isSearchBarOpen() {
-  return searchBar && searchBar.style.display !== "none";
+  return searchBar.style.display !== "none";
 }
 
-if (searchBar && searchInput) {
-  addon_search.onDidChangeResults((e) => {
-    if (!searchCount) return;
-    if (!e || e.resultCount === 0) {
-      searchCount.innerText = searchInput.value ? "0/0" : "";
-    } else {
-      searchCount.innerText = `${e.resultIndex + 1}/${e.resultCount}`;
-    }
-  });
-
-  searchInput.addEventListener("input", () => {
-    doSearch(false);
-  });
-
-  searchInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      doSearch(e.shiftKey);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      closeSearchBar();
-    }
-  });
-
-  if (searchPrev) {
-    searchPrev.addEventListener("click", () => doSearch(true));
+addon_search.onDidChangeResults((e) => {
+  if (!e || e.resultCount === 0) {
+    searchCount.innerText = searchInput.value ? "0/0" : "";
+  } else {
+    searchCount.innerText = `${e.resultIndex + 1}/${e.resultCount}`;
   }
-  if (searchNext) {
-    searchNext.addEventListener("click", () => doSearch(false));
+});
+
+searchInput.addEventListener("input", () => {
+  doSearch(false, true);
+});
+
+searchInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    doSearch(e.shiftKey);
   }
-  if (searchClose) {
-    searchClose.addEventListener("click", closeSearchBar);
-  }
-}
+});
+
+searchPrev.addEventListener("click", () => doSearch(true));
+searchNext.addEventListener("click", () => doSearch(false));
+searchClose.addEventListener("click", closeSearchBar);
 
 term.attachCustomKeyEventHandler((e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+  if ((e.ctrlKey || e.metaKey) && (e.key?.toLowerCase() === "f" || e.code === "KeyF")) {
+    e.preventDefault();
     if (e.type === "keydown") {
       openSearchBar();
     }
@@ -295,7 +265,10 @@ term.attachCustomKeyEventHandler((e) => {
 });
 
 window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && isSearchBarOpen()) {
+  if ((e.ctrlKey || e.metaKey) && (e.key?.toLowerCase() === "f" || e.code === "KeyF")) {
+    e.preventDefault();
+    openSearchBar();
+  } else if (e.key === "Escape" && isSearchBarOpen()) {
     closeSearchBar();
   }
 });

@@ -19,12 +19,12 @@ const { createDownloadRouter } = require("./download-handler");
 // =======================================================
 
 const ROOT_DIR = path.join(__dirname, "..");
-const WORK_DIR = fs.existsSync("/agy") ? "/agy" : (process.env.HOME || os.homedir());
+const WORK_DIR = "/agy";
 
 const SHELL_CMD = "/bin/bash";
 const SHELL_ARGS = [];
 
-const AGY_BIN = fs.existsSync("/root/.local/bin/agy") ? "/root/.local/bin/agy" : "agy";
+const AGY_BIN = "/root/.local/bin/agy";
 const AGY_ARGS = ["--dangerously-skip-permissions"];
 
 const ENV = {
@@ -125,7 +125,6 @@ class Session {
   constructor(name, mode) {
     this.name = name;
     this.mode = mode === "s" ? "s" : "a";
-    this.type = this.mode === "s" ? "bash" : "agy";
     this.command = this.mode === "s" ? SHELL_CMD : AGY_BIN;
     this.args = this.mode === "s" ? SHELL_ARGS : AGY_ARGS;
     this.createdAt = new Date();
@@ -267,9 +266,6 @@ function getOrCreateSession(name, mode) {
 for (const request_path in ROUTING_TABLE) {
   const { path: resource_path, cache } = ROUTING_TABLE[request_path];
   handler.get(request_path, (req, res) => {
-    if (req.method !== "GET") {
-      return res.status(405).type("text/plain").send(`Unsupported method ${req.method}`);
-    }
     const resolvedPath = path.join(ROOT_DIR, resource_path);
     if (!cache) {
       res.set("Cache-Control", "no-cache");
@@ -284,11 +280,7 @@ for (const request_path in ROUTING_TABLE) {
 }
 
 // 8. List all sessions
-handler.all(["/control/list", "/control/list/"], (req, res) => {
-  if (req.method !== "GET") {
-    return res.status(405).type("text/plain").send(`Unsupported method ${req.method}`);
-  }
-
+handler.get(["/control/list", "/control/list/"], (req, res) => {
   const sessionList = [];
   for (const [name, session] of sessions.entries()) {
     sessionList.push({
@@ -322,8 +314,6 @@ handler.all(["/control/abort/:name", "/control/abort/:name/"], (req, res) => {
   }
 
   session.abort();
-  sessions.delete(name);
-  cleanedSessions.add(name);
 
   res.set("Cache-Control", "no-cache");
   res.status(200).type("json").send(JSON.stringify({ ok: true, name }, null, 2) + "\n");
@@ -378,22 +368,7 @@ ws.use((socket, next) => {
 });
 
 ws.on("connection", (socket) => {
-  const sessionName = socket.handshake.query?.name;
-  const sessionMode = socket.handshake.query?.mode;
-
-  if (!sessionName || !sessionMode) {
-    socket.emit("error", "Missing session name or mode in socket query");
-    socket.disconnect(true);
-    return;
-  }
-
-  if (cleanedSessions.has(sessionName)) {
-    socket.emit("error", `Session "${sessionName}" has been cleaned up`);
-    socket.disconnect(true);
-    return;
-  }
-
-  const session = getOrCreateSession(sessionName, sessionMode);
+  const session = getOrCreateSession(socket.handshake.query.name, socket.handshake.query.mode);
   if (!session || !session.ptyProcess) {
     return;
   }
@@ -402,7 +377,7 @@ ws.on("connection", (socket) => {
   session.clients.add(socket.id);
   socket.emit("s.joinSuccess", { name: session.name, mode: session.mode });
 
-  if (session.buffer?.length > 0) {
+  if (session.buffer.length > 0) {
     socket.emit("t.s2c", session.buffer);
   }
 
@@ -411,9 +386,7 @@ ws.on("connection", (socket) => {
   });
 
   socket.on("t.resize", ({ cols, rows } = {}) => {
-    if (cols && rows) {
-      session.resize(cols, rows);
-    }
+    session.resize(cols, rows);
   });
 
   socket.on("disconnect", () => {

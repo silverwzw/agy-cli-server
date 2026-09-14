@@ -19,12 +19,7 @@ function triggerDirectDownload() {
 
   const a = document.createElement("a");
   a.href = directUrl;
-  a.style.display = "none";
-  document.body.appendChild(a);
   a.click();
-  setTimeout(() => {
-    try { document.body.removeChild(a); } catch (_) {}
-  }, 1000);
 }
 
 window.copyFromElement = copyFromElement;

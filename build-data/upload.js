@@ -36,10 +36,9 @@ function escapeHtml(str) {
 
 function computeTargetPath(file, totalCount) {
   let dest = destPathInput.value.trim().replace(/\\/g, "/") || "/agy";
-  const relPath = file.relativePath || file.webkitRelativePath || file.name;
-  const hasSubDir = relPath.includes("/");
-  if (totalCount > 1 || dest.endsWith("/") || !dest.includes(".") || hasSubDir) {
-    return (dest.replace(/\/+$/, "") + "/" + relPath).replace(/\/+/g, "/");
+  const relPath = file.relativePath || file.name;
+  if (totalCount > 1 || dest.endsWith("/") || !dest.includes(".") || relPath.includes("/")) {
+    return (dest + "/" + relPath).replace(/\/+/g, "/");
   }
   return dest;
 }
@@ -70,11 +69,11 @@ function renderFileList() {
   }
 
   fileList.innerHTML = selectedFiles.map((item, idx) => {
-    if (item.status !== "done" || !item.target) {
+    if (item.status !== "done") {
       item.target = computeTargetPath(item.file, pendingFiles.length);
     }
     const target = item.target;
-    const displayName = item.file.relativePath || item.file.webkitRelativePath || item.file.name;
+    const displayName = item.file.relativePath || item.file.name;
     let badgeClass = "status-pending";
     let badgeText = "Ready";
 
@@ -128,7 +127,7 @@ function addFiles(fileListInput) {
   for (const file of newFiles) {
     const target = computeTargetPath(file, totalPendingCount);
     const exists = selectedFiles.some(
-      item => item.status !== "done" && (item.target || computeTargetPath(item.file, totalPendingCount)) === target
+      item => item.status !== "done" && item.target === target
     );
     if (exists) {
       duplicates.push(target);
@@ -166,9 +165,7 @@ async function readAllDirectoryEntries(dirReader) {
 function getFileFromEntry(fileEntry, relativePath) {
   return new Promise((resolve, reject) => {
     fileEntry.file((file) => {
-      if (relativePath) {
-        file.relativePath = relativePath.replace(/^\/+/, "");
-      }
+      if (relativePath) file.relativePath = relativePath;
       resolve(file);
     }, reject);
   });
@@ -204,13 +201,10 @@ async function getFilesFromDataTransfer(dataTransfer) {
   const items = dataTransfer?.items;
   if (items && items.length > 0 && typeof items[0].webkitGetAsEntry === "function") {
     const promises = [];
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
+    for (const item of items) {
       if (item.kind === "file") {
         const entry = item.webkitGetAsEntry();
-        if (entry) {
-          promises.push(traverseEntry(entry, ""));
-        }
+        if (entry) promises.push(traverseEntry(entry, ""));
       }
     }
     const results = await Promise.all(promises);
@@ -284,10 +278,8 @@ function uploadSingleFile(file, target, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", "/control/upload?path=" + encodeURIComponent(target));
-    try {
-      xhr.setRequestHeader("X-File-Path", encodeURI(target));
-      xhr.setRequestHeader("X-File-Name", encodeURI(file.name));
-    } catch (_) {}
+    xhr.setRequestHeader("X-File-Path", encodeURI(target));
+    xhr.setRequestHeader("X-File-Name", encodeURI(file.name));
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
@@ -337,6 +329,12 @@ async function startUpload() {
   let failCount = 0;
   const errors = [];
 
+  function updateOverallProgress(loadedBytes) {
+    const overallPct = totalBytes > 0 ? ((loadedBytes / totalBytes) * 100).toFixed(1) : "100.0";
+    progressFill.style.width = overallPct + "%";
+    progressPct.innerText = `${overallPct}% (${formatBytes(loadedBytes)} / ${formatBytes(totalBytes)})`;
+  }
+
   for (let i = 0; i < totalFiles; i++) {
     const item = queue[i];
     const itemIdx = selectedFiles.indexOf(item);
@@ -346,23 +344,18 @@ async function startUpload() {
 
     const target = item.target || computeTargetPath(item.file, totalFiles);
     item.target = target;
-    const displayName = item.file.relativePath || item.file.webkitRelativePath || item.file.name;
+    const displayName = item.file.relativePath || item.file.name;
     progressStatus.innerText = `Uploading (${i + 1}/${totalFiles}): ${displayName}...`;
 
     try {
       await uploadSingleFile(item.file, target, (loaded) => {
         item.pct = item.file.size > 0 ? Math.min(100, Math.round((loaded / item.file.size) * 100)) : 100;
         updateItemBadge(itemIdx, "uploading", `${item.pct}%`);
-
-        const currentOverallLoaded = completedBytesBeforeCurrent + loaded;
-        const overallPct = totalBytes > 0 ? ((currentOverallLoaded / totalBytes) * 100).toFixed(1) : "100.0";
-        progressFill.style.width = overallPct + "%";
-        progressPct.innerText = `${overallPct}% (${formatBytes(currentOverallLoaded)} / ${formatBytes(totalBytes)})`;
+        updateOverallProgress(completedBytesBeforeCurrent + loaded);
       });
 
       item.status = "done";
       item.pct = 100;
-      item.target = target;
       updateItemBadge(itemIdx, "success", "✓ Done");
       successCount++;
     } catch (err) {
@@ -374,9 +367,7 @@ async function startUpload() {
     }
 
     completedBytesBeforeCurrent += item.file.size;
-    const currentProgressPct = totalBytes > 0 ? ((completedBytesBeforeCurrent / totalBytes) * 100).toFixed(1) : "100.0";
-    progressFill.style.width = currentProgressPct + "%";
-    progressPct.innerText = `${currentProgressPct}% (${formatBytes(completedBytesBeforeCurrent)} / ${formatBytes(totalBytes)})`;
+    updateOverallProgress(completedBytesBeforeCurrent);
   }
 
   isUploading = false;

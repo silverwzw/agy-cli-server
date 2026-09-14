@@ -58,22 +58,24 @@ function getDownloadHtml(targetFile, stat, rawUrl, ROOT_DIR) {
 
   const displayTarget = isDirectory ? `${targetFile} (directory archive)` : targetFile;
   const formattedSize = isDirectory ? `${formatBytes(stat.size)} (directory entry)` : formatBytes(stat.size);
+  const replacements = {
+    FILENAME: filename,
+    TARGET_FILE: displayTarget,
+    FORMATTED_SIZE: formattedSize,
+    RAW_SIZE: String(stat.size),
+    MODE_OCTAL: modeOctal,
+    USER_NAME: userName,
+    GROUP_NAME: groupName,
+    UID: String(uid),
+    GID: String(gid),
+    DIRECT_DOWNLOAD_URL: directDownloadUrl,
+    COMMANDS_STYLE: commandsStyle,
+    CHMOD_CMD: chmodCmd,
+    CHOWN_NAME_CMD: chownNameCmd,
+    CHOWN_ID_CMD: chownIdCmd,
+  };
 
-  return template
-    .replaceAll("{{FILENAME}}", filename)
-    .replaceAll("{{TARGET_FILE}}", displayTarget)
-    .replaceAll("{{FORMATTED_SIZE}}", formattedSize)
-    .replaceAll("{{RAW_SIZE}}", String(stat.size))
-    .replaceAll("{{MODE_OCTAL}}", modeOctal)
-    .replaceAll("{{USER_NAME}}", userName)
-    .replaceAll("{{GROUP_NAME}}", groupName)
-    .replaceAll("{{UID}}", String(uid))
-    .replaceAll("{{GID}}", String(gid))
-    .replaceAll("{{DIRECT_DOWNLOAD_URL}}", directDownloadUrl)
-    .replaceAll("{{COMMANDS_STYLE}}", commandsStyle)
-    .replaceAll("{{CHMOD_CMD}}", chmodCmd)
-    .replaceAll("{{CHOWN_NAME_CMD}}", chownNameCmd)
-    .replaceAll("{{CHOWN_ID_CMD}}", chownIdCmd);
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => replacements[key] ?? "");
 }
 
 function streamDirectoryArchive(req, res, targetDir) {
@@ -112,18 +114,13 @@ function streamDirectoryArchive(req, res, targetDir) {
 }
 
 function handleFileDownload(req, res, targetFile, displayPath, ROOT_DIR) {
-  if (req.method !== "GET") {
-    return res.status(405).type("text/plain").send(`Unsupported method ${req.method}\n`);
-  }
-
-  if (!fs.existsSync(targetFile)) {
-    return res.status(404).type("text/plain").send(`File not found: ${displayPath}\n`);
-  }
-
   let stat;
   try {
     stat = fs.statSync(targetFile);
   } catch (err) {
+    if (err.code === "ENOENT") {
+      return res.status(404).type("text/plain").send(`File not found: ${displayPath}\n`);
+    }
     return res.status(500).type("text/plain").send(`Error reading file status: ${err.message}\n`);
   }
 
@@ -154,7 +151,7 @@ function createDownloadRouter({ ROOT_DIR, WORK_DIR }) {
   const router = express.Router();
 
   // Relative path: GET /control/download/rel/<relative_path>
-  router.all(["/control/download/rel/{*path}"], (req, res) => {
+  router.get(["/control/download/rel/{*path}"], (req, res) => {
     let relPath = Array.isArray(req.params.path) ? req.params.path.join("/") : (req.params.path || "");
     relPath = decodeURIComponent(relPath).trim();
     if (!relPath) {
@@ -165,7 +162,7 @@ function createDownloadRouter({ ROOT_DIR, WORK_DIR }) {
   });
 
   // Absolute path: GET /control/download/abs/<absolute_path>
-  router.all(["/control/download/abs/{*path}"], (req, res) => {
+  router.get(["/control/download/abs/{*path}"], (req, res) => {
     let absPath = Array.isArray(req.params.path) ? req.params.path.join("/") : (req.params.path || "");
     absPath = decodeURIComponent(absPath).trim();
     if (!absPath) {
