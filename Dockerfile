@@ -24,21 +24,28 @@ RUN npm i \
 
 RUN jq '.scripts = { start: "node server/entry.js" }' package.json | sponge package.json
 
-COPY ./build-data/init /init
+COPY ./build-data/settings.json       /root/.gemini/antigravity-cli/settings.json
+COPY ./build-data/init                /init
 
 RUN chmod u+x /init && \
     echo 'alias agy="/root/.local/bin/agy --dangerously-skip-permissions"' >> /root/.bashrc
 
-COPY ./build-data/settings.json   /root/.gemini/antigravity-cli/settings.json
-COPY ./build-data/index.html      /webterm/client/index.html
-COPY ./build-data/upload.html     /webterm/client/upload.html
-COPY ./build-data/upload.js       /webterm/client/upload.js
-COPY ./build-data/download.html   /webterm/client/download.html
-COPY ./build-data/download.js     /webterm/client/download.js
-COPY ./build-data/client.js       /webterm/client/main.js
+COPY ./build-data/index.html          /webterm/client/index.html
+COPY ./build-data/upload.html         /webterm/client/upload.html
+COPY ./build-data/upload.js           /webterm/client/upload.raw.js
+COPY ./build-data/download.html       /webterm/client/download.html
+COPY ./build-data/download.js         /webterm/client/download.raw.js
+COPY ./build-data/client.js           /webterm/client/main.raw.js
+
 COPY ./build-data/upload-handler.js   /webterm/server/upload-handler.js
 COPY ./build-data/download-handler.js /webterm/server/download-handler.js
-COPY ./build-data/server.js       /webterm/server/entry.js
+COPY ./build-data/server.js           /webterm/server/entry.js
+
+WORKDIR /webterm/client
+
+RUN npx --yes esbuild main.raw.js --minify --outfile=main.js && \
+    npx --yes esbuild download.raw.js --minify --outfile=download.js && \
+    npx --yes esbuild upload.raw.js --minify --outfile=upload.js
 
 # RUN apt-get clean
 
