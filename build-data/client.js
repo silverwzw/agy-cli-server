@@ -1,7 +1,3 @@
-const url = new URL(location.href);
-const secure_protocol = url.protocol === "https:";
-const protocol = secure_protocol ? "wss" : "ws";
-
 const pathParts = window.location.pathname.split("/").filter(Boolean);
 let sessionMode = "";
 let sessionName = "";

@@ -36,8 +36,10 @@ function escapeHtml(str) {
 
 function computeTargetPath(file, totalCount) {
   let dest = destPathInput.value.trim().replace(/\\/g, "/") || "/agy";
-  if (totalCount > 1 || dest.endsWith("/") || !dest.includes(".")) {
-    return (dest.replace(/\/+$/, "") + "/" + file.name).replace(/\/+/g, "/");
+  const relPath = file.relativePath || file.webkitRelativePath || file.name;
+  const hasSubDir = relPath.includes("/");
+  if (totalCount > 1 || dest.endsWith("/") || !dest.includes(".") || hasSubDir) {
+    return (dest.replace(/\/+$/, "") + "/" + relPath).replace(/\/+/g, "/");
   }
   return dest;
 }
@@ -72,6 +74,7 @@ function renderFileList() {
       item.target = computeTargetPath(item.file, pendingFiles.length);
     }
     const target = item.target;
+    const displayName = item.file.relativePath || item.file.webkitRelativePath || item.file.name;
     let badgeClass = "status-pending";
     let badgeText = "Ready";
 
@@ -93,7 +96,7 @@ function renderFileList() {
     return `
       <div class="file-item" data-idx="${idx}">
         <div class="file-item-info">
-          <div class="file-item-name" title="${escapeHtml(item.file.name)}">${escapeHtml(item.file.name)}</div>
+          <div class="file-item-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</div>
           <div class="file-item-sub" title="${escapeHtml(target)}">↳ ${escapeHtml(target)} &bull; ${formatBytes(item.file.size)}</div>
         </div>
         <div class="file-item-actions">
@@ -117,13 +120,104 @@ function updateItemBadge(idx, status, badgeText) {
 function addFiles(fileListInput) {
   if (isUploading) return;
   const newFiles = Array.from(fileListInput);
+  const duplicates = [];
+
+  const pendingFiles = selectedFiles.filter(item => item.status !== "done");
+  const totalPendingCount = pendingFiles.length + newFiles.length;
+
   for (const file of newFiles) {
-    const exists = selectedFiles.some(item => item.file.name === file.name && item.file.size === file.size);
-    if (!exists) {
-      selectedFiles.push({ file, status: "pending", pct: 0, target: "" });
+    const target = computeTargetPath(file, totalPendingCount);
+    const exists = selectedFiles.some(
+      item => item.status !== "done" && (item.target || computeTargetPath(item.file, totalPendingCount)) === target
+    );
+    if (exists) {
+      duplicates.push(target);
+    } else {
+      selectedFiles.push({ file, status: "pending", pct: 0, target });
     }
   }
+
+  if (duplicates.length > 0) {
+    resultBox.className = "result-box error";
+    resultBox.style.display = "block";
+    const targets = duplicates.map(t => `<code>${escapeHtml(t)}</code>`).join(", ");
+    resultBox.innerHTML = `<strong>Duplicate target skipped:</strong> ${targets} already waiting in upload queue.`;
+  } else if (resultBox.classList.contains("error") && resultBox.innerHTML.includes("Duplicate target skipped")) {
+    resultBox.style.display = "none";
+  }
+
   renderFileList();
+}
+
+async function readAllDirectoryEntries(dirReader) {
+  const entries = [];
+  let batch;
+  do {
+    batch = await new Promise((resolve, reject) => {
+      dirReader.readEntries(resolve, reject);
+    });
+    if (batch && batch.length > 0) {
+      entries.push(...batch);
+    }
+  } while (batch && batch.length > 0);
+  return entries;
+}
+
+function getFileFromEntry(fileEntry, relativePath) {
+  return new Promise((resolve, reject) => {
+    fileEntry.file((file) => {
+      if (relativePath) {
+        file.relativePath = relativePath.replace(/^\/+/, "");
+      }
+      resolve(file);
+    }, reject);
+  });
+}
+
+async function traverseEntry(entry, currentPath = "") {
+  const entryPath = currentPath ? `${currentPath}/${entry.name}` : entry.name;
+  if (entry.isFile) {
+    try {
+      const file = await getFileFromEntry(entry, currentPath ? entryPath : "");
+      return [file];
+    } catch (err) {
+      console.warn("Could not read file from entry:", entry.name, err);
+      return [];
+    }
+  } else if (entry.isDirectory) {
+    try {
+      const dirReader = entry.createReader();
+      const entries = await readAllDirectoryEntries(dirReader);
+      const results = await Promise.all(
+        entries.map(subEntry => traverseEntry(subEntry, entryPath))
+      );
+      return results.flat();
+    } catch (err) {
+      console.warn("Could not read directory entry:", entry.name, err);
+      return [];
+    }
+  }
+  return [];
+}
+
+async function getFilesFromDataTransfer(dataTransfer) {
+  const items = dataTransfer?.items;
+  if (items && items.length > 0 && typeof items[0].webkitGetAsEntry === "function") {
+    const promises = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === "file") {
+        const entry = item.webkitGetAsEntry();
+        if (entry) {
+          promises.push(traverseEntry(entry, ""));
+        }
+      }
+    }
+    const results = await Promise.all(promises);
+    const files = results.flat();
+    if (files.length > 0) return files;
+  }
+  return Array.from(dataTransfer?.files || []);
 }
 
 dropZone.addEventListener("click", () => {
@@ -149,17 +243,21 @@ destPathInput.addEventListener("input", () => {
   });
 });
 
-["dragleave", "drop"].forEach(event => {
-  dropZone.addEventListener(event, (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dropZone.classList.remove("dragover");
-  });
+dropZone.addEventListener("dragleave", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  dropZone.classList.remove("dragover");
 });
 
-dropZone.addEventListener("drop", (e) => {
-  if (!isUploading && e.dataTransfer?.files?.length > 0) {
-    addFiles(e.dataTransfer.files);
+dropZone.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  dropZone.classList.remove("dragover");
+  if (isUploading) return;
+
+  const files = await getFilesFromDataTransfer(e.dataTransfer);
+  if (files.length > 0) {
+    addFiles(files);
   }
 });
 
@@ -248,7 +346,8 @@ async function startUpload() {
 
     const target = item.target || computeTargetPath(item.file, totalFiles);
     item.target = target;
-    progressStatus.innerText = `Uploading (${i + 1}/${totalFiles}): ${item.file.name}...`;
+    const displayName = item.file.relativePath || item.file.webkitRelativePath || item.file.name;
+    progressStatus.innerText = `Uploading (${i + 1}/${totalFiles}): ${displayName}...`;
 
     try {
       await uploadSingleFile(item.file, target, (loaded) => {
@@ -271,7 +370,7 @@ async function startUpload() {
       item.error = err.message || "Upload failed";
       updateItemBadge(itemIdx, "error", "✕ Failed");
       failCount++;
-      errors.push(`${item.file.name}: ${item.error}`);
+      errors.push(`${displayName}: ${item.error}`);
     }
 
     completedBytesBeforeCurrent += item.file.size;

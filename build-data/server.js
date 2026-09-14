@@ -7,11 +7,12 @@ const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const { exec } = require("child_process");
+const { createUploadRouter } = require("./upload-handler");
+const { createDownloadRouter } = require("./download-handler");
 
 // TODO: voice input
 // TODO: overlay
 // TODO: mobile adapt
-// TODO: directory download
 
 // =======================================================
 //                    Global Constants
@@ -97,109 +98,7 @@ const sessions = new Map();
 const cleanedSessions = new Set();
 
 
-function handleFileDownload(req, res, targetFile, displayPath) {
-  if (req.method !== "GET") {
-    return res.status(405).type("text/plain").send(`Unsupported method ${req.method}\n`);
-  }
 
-  if (!fs.existsSync(targetFile)) {
-    return res.status(404).type("text/plain").send(`File not found: ${displayPath}\n`);
-  }
-
-  let stat;
-  try {
-    stat = fs.statSync(targetFile);
-    if (stat.isDirectory()) {
-      return res.status(400).type("text/plain").send(`Target path is a directory, not a file: ${displayPath}\n`);
-    }
-  } catch (err) {
-    return res.status(500).type("text/plain").send(`Error reading file status: ${err.message}\n`);
-  }
-
-  const isHtmlClient = req.headers["accept"]?.includes("text/html");
-  const ua = (req.headers["user-agent"] || "").toLowerCase();
-  const isCli = ua.includes("curl") || ua.includes("wget");
-  const isRaw = req.query.raw !== undefined;
-  const wantsHtml = isHtmlClient && !isCli && !isRaw;
-
-  if (wantsHtml) {
-    return res.type("html").send(getDownloadHtml(targetFile, stat, req.originalUrl || req.url));
-  }
-
-  const filename = path.basename(targetFile);
-  res.download(targetFile, filename, (err) => {
-    if (err && !res.headersSent) {
-      console.error(`Error downloading file [${targetFile}]:`, err);
-      res.status(500).type("text/plain").send(`Error downloading file: ${err.message}\n`);
-    }
-  });
-}
-
-function getUserAndGroup(uid, gid) {
-  let userName = String(uid);
-  let groupName = String(gid);
-  try {
-    const passwd = fs.readFileSync("/etc/passwd", "utf-8");
-    for (const line of passwd.split("\n")) {
-      const parts = line.split(":");
-      if (parts.length >= 3 && parseInt(parts[2], 10) === uid) {
-        userName = parts[0];
-        break;
-      }
-    }
-  } catch (e) {}
-  try {
-    const group = fs.readFileSync("/etc/group", "utf-8");
-    for (const line of group.split("\n")) {
-      const parts = line.split(":");
-      if (parts.length >= 3 && parseInt(parts[2], 10) === gid) {
-        groupName = parts[0];
-        break;
-      }
-    }
-  } catch (e) {}
-  return { userName, groupName, uid, gid };
-}
-
-function formatBytes(bytes) {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return (bytes / Math.pow(k, i)).toFixed(2) + " " + sizes[i];
-}
-
-function getDownloadHtml(targetFile, stat, rawUrl) {
-  const filename = path.basename(targetFile);
-  const safeName = /^[a-zA-Z0-9_\\-\\.]+$/.test(filename) ? filename : JSON.stringify(filename);
-  const modeOctal = (stat.mode & 0o7777).toString(8);
-  const { userName, groupName, uid, gid } = getUserAndGroup(stat.uid, stat.gid);
-
-  const chmodCmd = `chmod ${modeOctal} ${safeName}`;
-  const chownNameCmd = `chown ${userName}:${groupName} ${safeName}`;
-  const chownIdCmd = `chown ${uid}:${gid} ${safeName}`;
-
-  const cleanUrl = rawUrl.split("?")[0];
-  const directDownloadUrl = `${cleanUrl}?raw`;
-
-  const templatePath = path.join(ROOT_DIR, "client/download.html");
-  let template = fs.readFileSync(templatePath, "utf-8");
-
-  return template
-    .replaceAll("{{FILENAME}}", filename)
-    .replaceAll("{{TARGET_FILE}}", targetFile)
-    .replaceAll("{{FORMATTED_SIZE}}", formatBytes(stat.size))
-    .replaceAll("{{RAW_SIZE}}", String(stat.size))
-    .replaceAll("{{MODE_OCTAL}}", modeOctal)
-    .replaceAll("{{USER_NAME}}", userName)
-    .replaceAll("{{GROUP_NAME}}", groupName)
-    .replaceAll("{{UID}}", String(uid))
-    .replaceAll("{{GID}}", String(gid))
-    .replaceAll("{{DIRECT_DOWNLOAD_URL}}", directDownloadUrl)
-    .replaceAll("{{CHMOD_CMD}}", chmodCmd)
-    .replaceAll("{{CHOWN_NAME_CMD}}", chownNameCmd)
-    .replaceAll("{{CHOWN_ID_CMD}}", chownIdCmd);
-}
 
 
 function killProcessTree(pid) {
@@ -430,109 +329,11 @@ handler.all(["/control/abort/:name", "/control/abort/:name/"], (req, res) => {
   res.status(200).type("json").send(JSON.stringify({ ok: true, name }, null, 2) + "\n");
 });
 
-// 10. File Upload: GET (Web UI), PUT (Upload handler)
-handler.all(["/control/upload", "/control/upload/"], (req, res) => {
-  if (req.method === "GET") {
-    res.set("Cache-Control", "no-cache");
-    return res.sendFile(path.join(ROOT_DIR, "client/upload.html"), { cacheControl: false });
-  }
+// 10. File Upload routes
+handler.use(createUploadRouter({ ROOT_DIR, WORK_DIR }));
 
-  if (req.method === "PUT") {
-    let rawPath = req.query.path || req.query.dest || req.headers["x-file-path"] || "";
-    if (!rawPath && req.query.filename) {
-      const dir = req.query.dir || WORK_DIR;
-      rawPath = path.join(dir, req.query.filename);
-    }
-    if (!rawPath && req.headers["x-file-name"]) {
-      rawPath = path.join(WORK_DIR, req.headers["x-file-name"]);
-    }
-    rawPath = String(rawPath).trim();
-
-    if (!rawPath) {
-      return res.status(400).type("text/plain").send("Missing target file path. Specify via query '?path=...' or 'x-file-path' header\n");
-    }
-
-    let targetPath = path.isAbsolute(rawPath) ? path.normalize(rawPath) : path.resolve(WORK_DIR, rawPath);
-    if (rawPath.endsWith("/") || (fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory())) {
-      const defaultFilename = req.headers["x-file-name"] || req.query.filename || `upload_${Date.now()}`;
-      targetPath = path.join(targetPath, defaultFilename);
-    }
-
-    try {
-      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-    } catch (err) {
-      return res.status(500).json({ ok: false, error: `Failed to create directory: ${err.message}` });
-    }
-
-    const writeStream = fs.createWriteStream(targetPath);
-    let totalBytes = 0;
-
-    req.on("data", (chunk) => {
-      totalBytes += chunk.length;
-    });
-
-    req.pipe(writeStream);
-
-    writeStream.on("finish", () => {
-      res.status(200).json({
-        ok: true,
-        path: targetPath,
-        size: totalBytes,
-        message: `File successfully uploaded to ${targetPath}`,
-      });
-    });
-
-    writeStream.on("error", (err) => {
-      console.error(`Error saving uploaded file [${targetPath}]:`, err);
-      if (!res.headersSent) {
-        res.status(500).json({ ok: false, error: err.message });
-      }
-    });
-
-    req.on("error", (err) => {
-      console.error("Upload request stream error:", err);
-      writeStream.destroy();
-      if (!res.headersSent) {
-        res.status(500).json({ ok: false, error: err.message });
-      }
-    });
-
-    return;
-  }
-
-  return res.status(405).type("text/plain").send(`Unsupported method ${req.method}\n`);
-});
-
-// 11. File Download:
-// Relative path: GET /control/download/rel/<relative_path>
-handler.all(["/control/download/rel/{*path}"], (req, res) => {
-  let relPath = Array.isArray(req.params.path) ? req.params.path.join("/") : (req.params.path || "");
-  relPath = decodeURIComponent(relPath).trim();
-  if (!relPath) {
-    return res.status(400).type("text/plain").send("Missing relative path. Usage: /control/download/rel/<relative_path>\n");
-  }
-  const targetFile = path.resolve(WORK_DIR, relPath);
-  handleFileDownload(req, res, targetFile, relPath);
-});
-
-// Absolute path: GET /control/download/abs/<absolute_path>
-handler.all(["/control/download/abs/{*path}"], (req, res) => {
-  let absPath = Array.isArray(req.params.path) ? req.params.path.join("/") : (req.params.path || "");
-  absPath = decodeURIComponent(absPath).trim();
-  if (!absPath) {
-    return res.status(400).type("text/plain").send("Missing absolute path. Usage: /control/download/abs/<absolute_path>\n");
-  }
-  const targetFile = path.resolve("/", absPath);
-  handleFileDownload(req, res, targetFile, "/" + absPath.replace(/^\/+/, ""));
-});
-
-// Fallback for missing path or invalid format
-handler.all(["/control/download", "/control/download/{*path}"], (req, res) => {
-  if (req.method !== "GET") {
-    return res.status(405).type("text/plain").send(`Unsupported method ${req.method}\n`);
-  }
-  return res.status(400).type("text/plain").send("Invalid download path format. Usage: /control/download/rel/<relative_path> or /control/download/abs/<absolute_path>\n");
-});
+// 11. File Download routes
+handler.use(createDownloadRouter({ ROOT_DIR, WORK_DIR }));
 
 // Redirect /, /a, /s
 handler.get(["/", "/a", "/a/", "/s", "/s/"], (req, res) => {

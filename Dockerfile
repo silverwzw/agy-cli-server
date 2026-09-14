@@ -4,7 +4,7 @@ RUN \
   apt-get update && \
   apt-get install -y vim && \
   apt-get install -y python3 pipx git vim nodejs npm curl iputils-ping && \
-  apt-get install -y poppler-utils jq moreutils wget
+  apt-get install -y poppler-utils jq moreutils wget procps
 
 RUN curl -fsSL https://antigravity.google/cli/install.sh | /bin/bash
 
@@ -24,13 +24,10 @@ RUN npm i \
 
 RUN jq '.scripts = { start: "node server/entry.js" }' package.json | sponge package.json
 
-
 COPY ./build-data/init /init
 
 RUN chmod u+x /init && \
     echo 'alias agy="/root/.local/bin/agy --dangerously-skip-permissions"' >> /root/.bashrc
-
-RUN apt-get install -y procps
 
 COPY ./build-data/settings.json   /root/.gemini/antigravity-cli/settings.json
 COPY ./build-data/index.html      /webterm/client/index.html
@@ -39,6 +36,8 @@ COPY ./build-data/upload.js       /webterm/client/upload.js
 COPY ./build-data/download.html   /webterm/client/download.html
 COPY ./build-data/download.js     /webterm/client/download.js
 COPY ./build-data/client.js       /webterm/client/main.js
+COPY ./build-data/upload-handler.js   /webterm/server/upload-handler.js
+COPY ./build-data/download-handler.js /webterm/server/download-handler.js
 COPY ./build-data/server.js       /webterm/server/entry.js
 
 # RUN apt-get clean
