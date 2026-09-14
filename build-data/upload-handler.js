@@ -7,7 +7,6 @@ function createUploadRouter({ ROOT_DIR, WORK_DIR }) {
 
   // File Upload: GET (Web UI)
   router.get(["/control/upload", "/control/upload/"], (req, res) => {
-    res.set("Cache-Control", "no-cache");
     return res.sendFile(path.join(ROOT_DIR, "client/upload.html"), { dotfiles: "allow" });
   });
 
@@ -28,8 +27,16 @@ function createUploadRouter({ ROOT_DIR, WORK_DIR }) {
       targetPath = path.join(targetPath, defaultFilename);
     }
 
-    // Return 409 Conflict if target file already exists
-    if (fs.existsSync(targetPath)) {
+    const overwriteQuery = req.query.overwrite;
+    const overwriteHeader = req.headers["x-overwrite"];
+    const allowOverwrite =
+      overwriteQuery === "true" ||
+      overwriteQuery === "1" ||
+      overwriteHeader === "true" ||
+      overwriteHeader === "1";
+
+    // Return 409 Conflict if target file already exists and overwrite is not permitted
+    if (!allowOverwrite && fs.existsSync(targetPath)) {
       req.resume();
       return res.status(409).json({
         ok: false,
@@ -43,7 +50,8 @@ function createUploadRouter({ ROOT_DIR, WORK_DIR }) {
       return res.status(500).json({ ok: false, error: `Failed to create directory: ${err.message}` });
     }
 
-    const writeStream = fs.createWriteStream(targetPath, { flags: "wx" });
+    const writeFlags = allowOverwrite ? "w" : "wx";
+    const writeStream = fs.createWriteStream(targetPath, { flags: writeFlags });
     req.pipe(writeStream);
 
     writeStream.on("finish", () => {
@@ -58,7 +66,7 @@ function createUploadRouter({ ROOT_DIR, WORK_DIR }) {
     writeStream.on("error", (err) => {
       console.error(`Error saving uploaded file [${targetPath}]:`, err);
       if (!res.headersSent) {
-        if (err.code === "EEXIST") {
+        if (!allowOverwrite && err.code === "EEXIST") {
           res.status(409).json({ ok: false, error: `File already exists: ${targetPath}` });
         } else {
           res.status(500).json({ ok: false, error: err.message });

@@ -2,9 +2,21 @@ FROM debian:stable-slim
 
 RUN \
   apt-get update && \
-  apt-get install -y vim && \
-  apt-get install -y python3 pipx git vim nodejs npm curl iputils-ping && \
-  apt-get install -y poppler-utils jq moreutils wget procps
+  apt-get install -y \
+    curl \
+    git \
+    iputils-ping \
+    jq \
+    moreutils \
+    nodejs \
+    npm \
+    pipx \
+    poppler-utils \
+    procps \
+    python3 \
+    vim \
+    wget && \
+  rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://antigravity.google/cli/install.sh | /bin/bash
 

@@ -87,8 +87,13 @@ const ROUTING_TABLE = {
 // =======================================================
 
 const handler = express();
+handler.set("trust proxy", true);
+
 const server = http.createServer(handler);
-const ws = socket(server);
+const ws = socket(server, {
+  pingInterval: 25000,
+  pingTimeout: 20000,
+});
 
 // =======================================================
 //                    Session Manager
@@ -182,7 +187,50 @@ class Session {
   appendBuffer(data) {
     this.buffer += data;
     if (this.buffer.length > this.maxBufferLength) {
-      this.buffer = this.buffer.slice(this.buffer.length - this.maxBufferLength);
+      let cutIndex = this.buffer.length - this.maxBufferLength;
+
+      // 1. Try to align cutIndex to the start of a line to avoid partial lines
+      const nextNewline = this.buffer.indexOf("\n", cutIndex);
+      if (nextNewline !== -1 && nextNewline < cutIndex + 4096) {
+        cutIndex = nextNewline + 1;
+      }
+
+      // 2. Ensure we do not split a UTF-16 surrogate pair
+      if (cutIndex > 0 && cutIndex < this.buffer.length) {
+        const prevCode = this.buffer.charCodeAt(cutIndex - 1);
+        const currCode = this.buffer.charCodeAt(cutIndex);
+        if (prevCode >= 0xd800 && prevCode <= 0xdbff && currCode >= 0xdc00 && currCode <= 0xdfff) {
+          cutIndex++;
+        }
+      }
+
+      // 3. Ensure we do not cut inside an ANSI escape sequence
+      const checkStart = Math.max(0, cutIndex - 256);
+      const lastEsc = this.buffer.lastIndexOf("\x1b", cutIndex - 1);
+      if (lastEsc >= checkStart) {
+        const escSlice = this.buffer.slice(lastEsc, cutIndex);
+        let isClosed = false;
+        if (escSlice.length === 1) {
+          isClosed = false;
+        } else if (escSlice[1] === "[") {
+          isClosed = /[\x40-\x7E]/.test(escSlice.slice(2));
+        } else if (escSlice[1] === "]") {
+          isClosed = /\x07|\x1b\\/.test(escSlice.slice(2));
+        } else {
+          isClosed = escSlice.length >= 3;
+        }
+
+        if (!isClosed) {
+          cutIndex = lastEsc;
+        }
+      }
+
+      // Safety fallback: ensure cutIndex advances so buffer does not grow indefinitely
+      if (cutIndex <= 0) {
+        cutIndex = this.buffer.length - this.maxBufferLength;
+      }
+
+      this.buffer = this.buffer.slice(cutIndex);
     }
   }
 
@@ -268,8 +316,7 @@ for (const request_path in ROUTING_TABLE) {
   handler.get(request_path, (req, res) => {
     const resolvedPath = path.join(ROOT_DIR, resource_path);
     if (!cache) {
-      res.set("Cache-Control", "no-cache");
-      res.sendFile(resolvedPath, { cacheControl: false });
+      res.sendFile(resolvedPath);
     } else {
       res.sendFile(resolvedPath, {
         maxAge: 10 * 3600 * 1000,
@@ -294,7 +341,6 @@ handler.get(["/control/list", "/control/list/"], (req, res) => {
     });
   }
 
-  res.set("Cache-Control", "no-cache");
   res.type("json").send(JSON.stringify(sessionList, null, 2) + "\n");
 });
 
@@ -315,7 +361,6 @@ handler.all(["/control/abort/:name", "/control/abort/:name/"], (req, res) => {
 
   session.abort();
 
-  res.set("Cache-Control", "no-cache");
   res.status(200).type("json").send(JSON.stringify({ ok: true, name }, null, 2) + "\n");
 });
 
@@ -342,12 +387,22 @@ handler.get(["/a/:name", "/s/:name"], (req, res) => {
     return res.status(410).type("text/plain").send(`Session "${name}" has been cleaned up\n`);
   }
   getOrCreateSession(name, mode);
-  res.set("Cache-Control", "no-cache");
-  res.sendFile(path.join(ROOT_DIR, "client/index.html"), { cacheControl: false });
+  res.sendFile(path.join(ROOT_DIR, "client/index.html"));
 });
 
 handler.use((req, res) => {
-  res.status(404).type("text/plain").send("Not Found");
+  res.status(404).type("text/plain").send("Not Found\n");
+});
+
+// Global error-handling middleware
+handler.use((err, req, res, next) => {
+  console.error("Unhandled server error:", err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  const statusCode = typeof err?.status === "number" && err.status >= 400 && err.status < 600 ? err.status : 500;
+  const message = statusCode === 500 ? "Internal Server Error\n" : `${err?.message || "Error"}\n`;
+  res.status(statusCode).type("text/plain").send(message);
 });
 
 // =======================================================
@@ -397,6 +452,10 @@ ws.on("connection", (socket) => {
 // =======================================================
 //                     Start Server
 // =======================================================
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+});
 
 server.listen(8443, () => console.log("listening on http://0.0.0.0:8443"));
 

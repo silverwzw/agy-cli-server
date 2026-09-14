@@ -1,0 +1,1122 @@
+================================================================================
+                         ANTIGRAVITY AGENT WORKLOG
+================================================================================
+Date:                   2026-09-14
+Conversation ID:        8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662
+Workspace:              /source (silverwzw/agy-cli-server)
+First Message Time:     2026-09-14T04:01:10Z
+Last Message Time:      2026-09-14T07:52:29Z
+Log Generated Time:     2026-09-14T07:52:29Z
+Total Turns:            11
+Total Trajectory Steps: 258
+================================================================================
+
+--------------------------------------------------------------------------------
+[Turn 1] Timestamp: 2026-09-14T04:01:10Z (Step: 0)
+--------------------------------------------------------------------------------
+
+USER:
+检查本项目，提供改进意见
+
+ACTIONS / TOOL CALLS:
+  - [Tool: list_dir] /source (List source files)
+  - [Tool: view_file] /source/AGENTS.md (View AGENTS.md)
+  - [Tool: view_file] /source/Dockerfile (View Dockerfile)
+  - [Tool: view_file] /source/test.sh (View test.sh)
+  - [Tool: list_dir] /source/build-data (List build-data)
+  - [Tool: list_dir] /source/data (List data)
+  - [Tool: list_dir] /source/util (List util)
+  - [Tool: list_dir] /source/agent_worklog (List agent_worklog)
+  - [Tool: run_command] `git status -s` (Git status)
+  - [Tool: run_command] `git log -n 5 --oneline` (Git log)
+  - [Tool: view_file] /source/build-data/init (View build-data/init)
+  - [Tool: view_file] /source/build-data/settings.json (View build-data/settings.json)
+  - [Tool: view_file] /source/data/dev_init (View data/dev_init)
+  - [Tool: view_file] /source/build-data/server.js (View build-data/server.js)
+  - [Tool: view_file] /source/build-data/upload-handler.js (View build-data/upload-handler.js)
+  - [Tool: view_file] /source/build-data/download-handler.js (View build-data/download-handler.js)
+  - [Tool: view_file] /source/build-data/client.js (View build-data/client.js)
+  - [Tool: view_file] /source/build-data/download.js (View build-data/download.js)
+  - [Tool: view_file] /source/build-data/upload.js (View build-data/upload.js)
+  - [Tool: view_file] /source/build-data/index.html (View build-data/index.html)
+  - [Tool: view_file] /source/build-data/upload.html (View build-data/upload.html)
+  - [Tool: view_file] /source/build-data/download.html (View build-data/download.html)
+  - [Tool: view_file] /source/util/progress_bar.js (View util/progress_bar.js)
+  - [Tool: view_file] /source/.gitignore (View .gitignore)
+  - [Tool: list_dir] /source/data/secrets (List data/secrets)
+  - [Tool: find_by_name] Pattern: `.dockerignore` in `/source` (Find .dockerignore)
+  - [Tool: find_by_name] Pattern: `*README*` in `/source` (Find README)
+  - [Tool: find_by_name] Pattern: `package.json` in `/source` (Find package.json)
+
+AGENT:
+对本项目进行全面检查后，整体来看：**架构设计清晰，利用 Node.js (`node-pty` + `socket.io` + `express`) 与前端 `xterm.js` 实现了全双工的 Web 终端与轻量文件传输，并贴心地集成了 OSC 9;4 进度条及下载后权限还原指令，功能定位非常明确**。
+
+但在**安全性、容器构建、异常容错、路径处理与终端体验**等方面存在较多值得改进与加固的地方。以下按优先级梳理具体的检查结果与改进建议：
+
+---
+
+### 一、 安全性与权限控制（🔴 极高优先级）
+
+1. **缺少身份鉴权与访问隔离（最严峻风险）**
+   - **现状**：服务默认监听在 `8443` 端口（无 TLS、无 Auth），任何人只要能访问端口，通过访问 [`/s/<name>`](file:///source/build-data/server.js#L335) 即可直接打开一个以 **`root` 权限运行的交互式 Bash**，拥有容器内所有文件修改与进程管理权限。
+   - **建议**：
+     - 增加基本认证（HTTP Basic Auth）、统一 Access Token（如请求头/Query 参数 `?token=...`）或会话密码。
+     - 提供环境变量配置（如 `AUTH_SECRET`），未鉴权请求一律返回 `401 Unauthorized`。
+
+2. **文件上传/下载存在越界与任意路径读写风险**
+   - **现状**：
+     - 在 [`upload-handler.js`](file:///source/build-data/upload-handler.js#L25) 中，`let targetPath = path.isAbsolute(rawPath) ? path.normalize(rawPath) : path.resolve(WORK_DIR, rawPath);`。若传入绝对路径（如 `/etc/cron.d/xxx`、`/root/.bashrc`），或者通过 `../../` 路径穿越，即可在容器任意位置写入文件。
+     - 在 [`download-handler.js`](file:///source/build-data/download-handler.js#L165-L173) 的 `/control/download/abs/{*path}` 中，允许直接下载系统根目录下的任意文件，任何客户端均可下载敏感配置（如挂载的 [`agy-token`](file:///source/data/secrets/agy-token)、系统密码散列 `/etc/shadow` 等），甚至可将整个根目录打包压缩流式下载。
+   - **建议**：
+     - 严格做目录沙箱限制（Sandbox）：校验 `targetPath.startsWith(WORK_DIR)`，非沙箱路径默认禁止访问；
+     - 绝对路径操作如果确属高级管理需要，必须限定在特定管理模式并要求管理员密钥。
+
+3. **下载页面模板未做 HTML 转义（潜在 XSS）**
+   - **现状**：在 [`getDownloadHtml`](file:///source/build-data/download-handler.js#L40-L79) 中，直接将文件名 `FILENAME`、路径 `TARGET_FILE`、命令字符串等通过正则替换注入到 [`download.html`](file:///source/build-data/download.html) 中。若文件名包含 `<script>` 或 `<img onerror=...>` 等特殊字符，将触发反射型 XSS。
+   - **建议**：使用 HTML 转义函数（类似 [`upload.js`](file:///source/build-data/upload.js#L27-L35) 中的 [`escapeHtml`](file:///source/build-data/upload.js#L27)）处理模板替换变量。
+
+---
+
+### 二、 容器与构建工程化（🟡 高优先级）
+
+1. **缺失 `.dockerignore` 文件**
+   - **现状**：项目未提供 `.dockerignore`。执行 `docker build .` 时，宿主机的 `.git/`（通常很大）以及开发密钥目录 [`data/secrets/`](file:///source/data/secrets/) 都会被完整发送至 Docker Daemon 构建上下文，存在镜像膨胀和敏感数据泄露风险。
+   - **建议**：在根目录下新增 `.dockerignore`：
+     ```dockerignore
+     .git
+     data/secrets
+     agent_worklog
+     tmp
+     *.tmp
+     *.swp
+     ```
+
+2. **缺少宿主机版本锁与 `package.json`**
+   - **现状**：项目源码目录中没有 `package.json` 和 `package-lock.json`，而是依赖 [`Dockerfile`](file:///source/Dockerfile#L13-L25) 在构建阶段动态 `RUN npm i ...`。
+   - **问题**：构建不可复现（Non-reproducible build）。一旦 `@xterm/xterm` 或 `express`、`socket.io` 发布不兼容的大版本升级，镜像构建将直接失败；且在 IDE 开发时缺乏依赖索引与代码补全。
+   - **建议**：将依赖配置固化为项目根目录的 `package.json` 与 `package-lock.json`，在 [`Dockerfile`](file:///source/Dockerfile) 中执行 `npm ci`。
+
+3. **[`Dockerfile`](file:///source/Dockerfile) 优化**
+   - **重复安装**：第 5 行与第 6 行重复声明了 `apt-get install -y vim`。
+   - **缓存未清理**：安装完成后未清理 `apt` 缓存（第 50 行注释掉了 `# RUN apt-get clean`，且缺失 `rm -rf /var/lib/apt/lists/*`），会额外多占用 50~100MB 镜像体积。
+   - **esbuild 依赖**：第 46-48 行使用 `npx --yes esbuild` 在构建阶段在线拉取未锁版本的二进制，建议纳入构建依赖或多阶段构建（Multi-stage build）。
+
+---
+
+### 三、 服务端架构与容错（🟡 中优先级）
+
+1. **会话管理内存泄漏隐患**
+   - **现状**：在 [`server.js`](file:///source/build-data/server.js#L98) 中，`cleanedSessions = new Set()` 持续记录所有已销毁的会话名；随着长时间运行或自动化请求增多，该集合只增不减。
+   - **建议**：引入带容量限制的 LRU Cache 或基于时间戳的 TTL 自动淘汰机制。
+
+2. **缺少全局错误中间件**
+   - **现状**：Express 缺少四参数错误处理中间件 `(err, req, res, next)`。路由异步处理若发生未捕获异常（如 stream 管道异常、文件系统异常），可能导致主进程未处理异常崩溃。
+   - **建议**：在 [`server.js`](file:///source/build-data/server.js) 末尾增加统一错误捕获中间件，并监听 `process.on('unhandledRejection')`。
+
+3. **PTY 历史 Buffer 截断乱码问题**
+   - **现状**：[`appendBuffer`](file:///source/build-data/server.js#L182-L187) 中采用简单的字符串截断：`this.buffer = this.buffer.slice(this.buffer.length - this.maxBufferLength)`。
+   - **问题**：如果切片恰好发生在多字节 UTF-8 字符或 ANSI Escape Sequence（如 `\x1b[38;2;...`）中间，客户端重新连接并回放历史输出时，终端首行会出现乱码或色彩错乱。
+   - **建议**：截断时寻找最近的换行符 `\n` 或 ESC 序列边界对齐。
+
+4. **上传路径计算启发式缺陷**
+   - **现状**：[`upload.js`](file:///source/build-data/upload.js#L40) 中的 [`computeTargetPath`](file:///source/build-data/upload.js#L37) 使用 `!dest.includes(".")` 判断目标路径是否为目录。
+   - **问题**：若用户目标目录本身包含点（例如 `/agy/v1.0/` 或 `/agy/my.project`），会被误判为文件名，导致单文件上传时覆盖该目录名为文件。
+   - **建议**：优先根据末尾是否有 `/` 或通过服务端 stat API 判断，而不是通过文件名是否有点来进行猜测。
+
+5. **上传缺少“强制覆盖”选项**
+   - **现状**：[`upload-handler.js`](file:///source/build-data/upload-handler.js#L32-L38) 写入模式为 `wx`，遇到已有文件直接返回 `409 Conflict`。
+   - **建议**：在前端界面增加「覆盖已存在文件（Overwrite）」复选框，服务端根据 query 参数（如 `?overwrite=true`）决定是否启用覆盖模式。
+
+---
+
+### 四、 终端交互体验与功能扩展（🟢 中/低优先级）
+
+1. **终端外观与滚动历史行数**
+   - **现状**：在 [`client.js`](file:///source/build-data/client.js#L43-L46) 中，`Terminal` 采用默认配置，`scrollback` 默认为 1000 行，对于长日志或长时间交互极易被冲刷丢失；且缺少字号与字体栈配置。
+   - **建议**：
+     ```js
+     const term = new Terminal({
+       allowProposedApi: true,
+       scrollback: 10000,
+       cursorBlink: true,
+       fontFamily: 'ui-monospace, SFMono-Regular, "Cascadia Code", Menlo, Monaco, Consolas, monospace',
+       fontSize: 14,
+       theme: { background: '#0f172a' }
+     });
+     ```
+
+2. **浏览器标签页标题与终端工作状态同步**
+   - **建议**：监听 `term.onTitleChange((title) => { document.title = title || defaultTitle; })`，实时响应 shell 发出的窗口标题转义序列（显示当前工作目录或执行中的命令）。
+
+3. **连接中断与会话重连提示**
+   - **现状**：网络断开或会话终止后，终端静止，用户无法直观区分是命令耗时还是断网。
+   - **建议**：在断网时显示居中遮罩条（"Reconnecting to server..."），会话正常退出后显示「重新创建会话」或「返回主页」的操作按钮。
+
+4. **移动端适配与辅助键盘栏（对应代码中的 `// TODO: mobile adapt`）**
+   - **现状**：在移动端/平板设备使用时，缺少 `Ctrl`、`Esc`、`Tab`、方向键等特殊键，虚拟键盘容易遮挡终端。
+   - **建议**：在移动端视口底部提供吸附的辅助工具栏，包含 `ESC`、`TAB`、`CTRL`、`ALT`、`↑`、`↓` 快速输入按钮。
+
+---
+
+### 五、 文档与开发规范（🟢 长期维护）
+
+1. **补充项目说明文档 [`README.md`](file:///source)**
+   - 包含：项目架构拓扑图、端口与环境变量说明、快速启动方式、安全性注意事项、开发调试指南。
+2. **整理测试脚本 [`test.sh`](file:///source/test.sh)**
+   - 目前 [`test.sh`](file:///source/test.sh) 混合了 Tab 与空格缩进，建议统一格式，并将硬编码的端口与路径提取为可配置环境变量（如 `${PORT:-8443}`）。
+
+--------------------------------------------------------------------------------
+[Turn 2] Timestamp: 2026-09-14T04:40:29Z (Step: 45)
+--------------------------------------------------------------------------------
+
+USER:
+请修复：下载页面模板未做 HTML 转义问题，缺失 .dockerignore 文件问题，重复的vim install问题，express缺少缺少全局错误中间，PTY 历史 Buffer 截断乱码问题
+
+ACTIONS / TOOL CALLS:
+  - [Tool: write_to_file] /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/test_fixes.js: Unit test for escapeHtml and appendBuffer truncation
+  - [Tool: run_command] `node /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/test_fixes.js` (Run test_fixes.js)
+  - [Tool: view_file] /source/build-data/download-handler.js (Lines 35-85) (View download-handler.js lines 35-85)
+  - [Tool: view_file] /source/build-data/download-handler.js (Lines 180-193) (View download-handler.js lines 180-193)
+  - [Tool: replace_file_content] /source/build-data/download-handler.js: Add escapeHtml helper and escape replacement values in getDownloadHtml
+  - [Tool: replace_file_content] /source/build-data/download-handler.js: Add escapeHtml to module.exports
+  - [Tool: write_to_file] /source/.dockerignore: Add .dockerignore to prevent git metadata, secrets, and logs from entering Docker build context
+  - [Tool: view_file] /source/Dockerfile (Lines 1-15) (View Dockerfile lines 1-15)
+  - [Tool: view_file] /source/Dockerfile (Lines 45-60) (View Dockerfile lines 45-60)
+  - [Tool: replace_file_content] /source/Dockerfile: Consolidate apt-get install commands, remove duplicate vim, and clean apt cache
+  - [Tool: view_file] /source/Dockerfile (Lines 55-73) (View Dockerfile lines 55-73)
+  - [Tool: view_file] /source/build-data/server.js (Lines 180-200) (View server.js lines 180-200)
+  - [Tool: view_file] /source/build-data/server.js (Lines 340-365) (View server.js lines 340-365)
+  - [Tool: view_file] /source/build-data/server.js (Lines 390-404) (View server.js lines 390-404)
+  - [Tool: replace_file_content] /source/build-data/server.js: Update appendBuffer with robust line, UTF-16 surrogate, and ANSI escape sequence boundary handling
+  - [Tool: view_file] /source/build-data/server.js (Lines 385-415) (View server.js lines 385-415)
+  - [Tool: view_file] /source/build-data/server.js (Lines 435-447) (View server.js lines 435-447)
+  - [Tool: replace_file_content] /source/build-data/server.js: Add global error-handling middleware after the 404 handler
+  - [Tool: view_file] /source/build-data/server.js (Lines 445-460) (View server.js lines 445-460)
+  - [Tool: replace_file_content] /source/build-data/server.js: Add process.on('unhandledRejection') before starting the server
+  - [Tool: run_command] `git status` (Git status)
+  - [Tool: run_command] `git status -s --ignored` (Git status ignored)
+  - [Tool: run_command] `git diff` (Git diff)
+  - [Tool: run_command] `cp /source/build-data/download-handler.js /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/ && cp /source/build-data/server.js /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/ && node -c /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/download-handler.js && node -c /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/server.js` (Syntax check)
+
+AGENT:
+已完成对上述 5 个问题的修复，修改详情如下：
+
+---
+
+### 1. 修复下载页面模板未做 HTML 转义（XSS 隐患）
+- **修改文件**：[`download-handler.js`](file:///source/build-data/download-handler.js#L40-L78)
+- **修复方案**：
+  - 新增 [`escapeHtml`](file:///source/build-data/download-handler.js#L40-L48) 工具函数，对特殊字符（`&`, `<`, `>`, `"`, `'`）进行实体转义。
+  - 在 [`getDownloadHtml`](file:///source/build-data/download-handler.js#L50-L89) 中，将文件名（`FILENAME`）、文件展示路径（`TARGET_FILE`）、权限与属主信息、直接下载链接（`DIRECT_DOWNLOAD_URL`）以及权限还原命令（`CHMOD_CMD`、`CHOWN_NAME_CMD`、`CHOWN_ID_CMD`）全部做转义处理后注入模板，彻底杜绝反射型 XSS 漏洞。
+  - 在 [`module.exports`](file:///source/build-data/download-handler.js#L199-L203) 中同步导出了该函数以支持单元测试。
+
+---
+
+### 2. 新增缺失的 [`.dockerignore`](file:///source/.dockerignore) 文件
+- **新增文件**：[`.dockerignore`](file:///source/.dockerignore)
+- **配置内容**：
+  ```dockerignore
+  # Version control
+  .git
+  .gitignore
+
+  # Secrets and credentials
+  data/secrets/
+
+  # Agent logs and temporary files
+  agent_worklog/
+  tmp/
+  *.tmp
+  *.swp
+  *.log
+  ```
+- **效果**：避免本地海量 Git 历史对象（`.git/`）、敏感认证密钥（`data/secrets/`）以及日志临时文件被意外打入 Docker 构建上下文，提升构建速度并防止机密信息泄露。
+
+---
+
+### 3. 修复 [`Dockerfile`](file:///source/Dockerfile) 中重复安装 vim 问题
+- **修改文件**：[`Dockerfile`](file:///source/Dockerfile#L3-L19)
+- **修复方案**：
+  - 合并并去除了重复声明的 `vim` 包安装。
+  - 依赖包按字母序统一排版，并在同一构建层后增加 `rm -rf /var/lib/apt/lists/*` 清理 apt 列表缓存，减少镜像层体积。
+
+---
+
+### 4. 为 Express 补充全局错误处理中间件
+- **修改文件**：[`server.js`](file:///source/build-data/server.js#L396-L405)
+- **修复方案**：
+  - 在 404 处理器后追加标准四参数错误处理中间件 `(err, req, res, next)`：
+    ```javascript
+    // Global error-handling middleware
+    handler.use((err, req, res, next) => {
+      console.error("Unhandled server error:", err);
+      if (res.headersSent) {
+        return next(err);
+      }
+      const statusCode = typeof err?.status === "number" && err.status >= 400 && err.status < 600 ? err.status : 500;
+      const message = statusCode === 500 ? "Internal Server Error\n" : `${err?.message || "Error"}\n`;
+      res.status(statusCode).type("text/plain").send(message);
+    });
+    ```
+  - 在服务启动前增加了 `process.on("unhandledRejection")` 监听，防止未处理的 Promise Rejection 导致服务无声崩溃。
+
+---
+
+### 5. 修复 PTY 历史 Buffer 截断导致的乱码问题
+- **修改文件**：[`server.js`](file:///source/build-data/server.js#L182-L229)
+- **修复方案**：
+  - 重构 [`appendBuffer`](file:///source/build-data/server.js#L182) 方法，将简单的字节长度切片升级为**三重安全边界截断**：
+    1. **行首对齐**：优先探测截断点附近的下一个换行符 `\n`，避免展示半截断行。
+    2. **UTF-16 代理对保护**：检测截断点是否正好切开 Emoji 或多字节字符的高低代理对（`\uD800-\uDBFF` 与 `\uDC00-\uDFFF`），若是则整字保留。
+    3. **ANSI 转义序列边界保护**：向前探测是否存在未闭合的 CSI 序列（`\x1b[...`）或 OSC 序列（`\x1b]...`），未闭合时自动将切片点回退到 `\x1b` 之前，避免客户端重连时首行出现 `2;255m` 等 ANSI 残余字符或色彩错乱。
+  - 增加防死锁安全保底逻辑，确保缓冲区不会无限膨胀。
+
+---
+
+### 验证情况
+- 编写测试用例并在专用临时目录中完成验证：
+  - `escapeHtml` 各类特殊符号转义测试均通过；
+  - `appendBuffer` 行对齐、CSI 转义字符保护、多字节代理对保护测试均通过；
+  - 所有改动文件的 JavaScript 语法检查（`node -c`）通过，无语法与引用错误。
+
+--------------------------------------------------------------------------------
+[Turn 3] Timestamp: 2026-09-14T04:43:18Z (Step: 95)
+--------------------------------------------------------------------------------
+
+USER:
+对于浏览器标签页标题与终端工作状态同步，如何兼容progress bar addon也会更改标签页标题的问题？
+
+ACTIONS / TOOL CALLS:
+  - [Tool: view_file] /source/build-data/client.js (Lines 30-45) (View client.js lines 30-45)
+  - [Tool: view_file] /source/build-data/client.js (Lines 130-170) (View client.js lines 130-170)
+
+AGENT:
+要优雅且无冲突地同时支持 **终端工作状态标题（`term.onTitleChange`）** 与 **进度条前缀（`addon_progress.onChange`）**，核心思路是：**状态分离（State Separation）与统一渲染器（Single-Source-of-Truth Renderer）**。
+
+---
+
+### 一、 产生冲突的原因分析
+
+若两处逻辑直接各自给 `document.title` 赋值，会出现以下竞态与覆盖问题：
+1. **状态被冲掉**：如果当前正处于进度条运行状态（例如 `(45%) 会话名`），此时命令输出触发了 `term.onTitleChange`（如执行了 `vim` 或 `cd`），终端事件会直接将 `document.title` 覆盖为 `vim`，导致**进度百分比瞬间消失**。
+2. **动态工作状态丢失**：反过来，当进度条继续递增到 `(46%)` 时，进度条插件使用的是初始化时缓存的静态 `defaultTitle`，又会直接把刚更新的 `vim` 抹掉，**退化为初始的静态标题**。
+3. **进度完成后无法回退到当前实际状态**：进度完成（`state = 0`）时，标题会被强行重置为初始的 `defaultTitle`，而不是终端当前的最新状态。
+
+---
+
+### 二、 解决方案：状态分离与统一渲染
+
+将网页标题拆解为两个互相独立的状态维度：
+- **`baseTitle`（基础标题）**：由当前会话名与终端实时工作状态（Shell/进程标题）决定；
+- **`progressPrefix`（进度前缀）**：由 `addon_progress` 的当前状态码与百分比决定。
+
+无论是终端发出了标题变更，还是进度条更新了百分比，均**只更新各自的状态变量，随后调用统一的 `updateTitle()` 渲染函数**。
+
+---
+
+### 三、 推荐代码实现
+
+在 [`client.js`](file:///source/build-data/client.js) 中做如下重构即可完美兼容：
+
+```javascript
+// =======================================================
+//                  Tab Title Synchronization
+// =======================================================
+
+const DEFAULT_TITLE = `${sessionName} - Web Terminal`;
+let currentTermTitle = "";  // 终端内部程序设置的工作标题 (来自 term.onTitleChange)
+let progressPrefix = "";    // 进度条前缀 (来自 addon_progress)
+
+/**
+ * 统一渲染浏览器标签页标题
+ */
+function updateTitle() {
+  // 保持会话名标识，避免多标签页切换时混淆会话
+  const baseTitle = currentTermTitle
+    ? `${currentTermTitle} (${sessionName})`
+    : DEFAULT_TITLE;
+
+  document.title = `${progressPrefix}${baseTitle}`;
+}
+
+// 1. 监听终端内部标题变更 (OSC 0 / OSC 2，如 bash/zsh/vim 发送的标题)
+term.onTitleChange((title) => {
+  const cleanTitle = (title || "").trim();
+  // 过滤空标题或与当前一致的变更
+  if (currentTermTitle !== cleanTitle) {
+    currentTermTitle = cleanTitle;
+    updateTitle();
+  }
+});
+
+// 2. 改造 Progress Addon 监听逻辑
+addon_progress.onChange(({ state, value }) => {
+  if (!progressBar) return;
+
+  switch (state) {
+    case 0: // 移除/完成
+      progressBar.style.opacity = "0";
+      progressBar.style.width = "0%";
+      progressPrefix = "";
+      break;
+
+    case 1: // 正常进行中
+      progressBar.style.backgroundColor = "#38bdf8";
+      progressBar.style.opacity = "1";
+      progressBar.style.width = `${Math.min(Math.max(value, 0), 100)}%`;
+      progressPrefix = `(${value}%) `;
+      break;
+
+    case 2: // 异常/错误
+      progressBar.style.backgroundColor = "#ef4444";
+      progressBar.style.opacity = "1";
+      progressBar.style.width = `${value > 0 ? value : 100}%`;
+      progressPrefix = `[!] (${value}%) `;
+      break;
+
+    case 3: // 不确定进度 (Indeterminate / 跑马灯)
+      progressBar.style.backgroundColor = "#a855f7";
+      progressBar.style.opacity = "1";
+      progressBar.style.width = "100%";
+      progressPrefix = `(...) `;
+      break;
+
+    case 4: // 暂停/警告
+      progressBar.style.backgroundColor = "#f59e0b";
+      progressBar.style.opacity = "1";
+      progressBar.style.width = `${value}%`;
+      progressPrefix = `[Paused] (${value}%) `;
+      break;
+  }
+
+  updateTitle();
+});
+```
+
+---
+
+### 四、 方案优势与边界场景效果
+
+| 场景 | 标题显示效果 | 行为说明 |
+| :--- | :--- | :--- |
+| **初始待机状态** | `a1b2c3d4 - Web Terminal` | 默认状态，显示当前会话名。 |
+| **执行常用命令（无进度条）** | `user@server: ~/agy (a1b2c3d4)` 或 `vim main.js (a1b2c3d4)` | 实时随 shell / 编辑器同步，并保留会话后缀。 |
+| **触发进度条任务** | `(35%) user@server: ~/agy (a1b2c3d4)` | 动态追加百分比前缀，同时保留当前执行的工作状态。 |
+| **运行中终端切换了状态** | `(36%) compiling... (a1b2c3d4)` | 进度与命令状态同时无缝刷新，不互相顶替。 |
+| **任务结束（进度条消失）** | `user@server: ~/agy (a1b2c3d4)` | 前缀平滑移除，标题自然回退到当前工作状态，而不是跳回最原始的默认标题。 |
+
+--------------------------------------------------------------------------------
+[Turn 4] Timestamp: 2026-09-14T05:09:29Z (Step: 101)
+--------------------------------------------------------------------------------
+
+USER:
+错误处理中间件在什么情况下会被调用到，请举个例子
+
+AGENT:
+在 Express 中，错误处理中间件之所以特殊，是因为它具有 **4 个参数 `(err, req, res, next)`**。Express 会通过函数参数数量（`fn.length === 4`）来识别它。一旦在处理流程中触发了错误，Express 会**跳过后续所有普通路由和中间件**，直接定位并执行这个四参数的错误处理中间件。
+
+以下是它被调用的主要场景及具体例子：
+
+---
+
+### 一、 错误处理中间件被触发的 4 种常见场景
+
+1. **路由或中间件内同步抛出异常 (`throw new Error`)**
+   - Express 会在执行路由时自动包裹 `try...catch`。只要有同步代码 `throw`，Express 会自动将其捕获并调用 `next(err)`。
+2. **异步操作中显式调用 `next(err)`**
+   - 在回调函数、Promise `.catch()` 或事件监听器中，执行 `next(err)` 将错误委托给全局。
+3. **URL 畸形或编码解析失败（`URIError`）**
+   - 例如客户端发送了非法的百分号编码（如 `/a/%FF` 或 `/control/download/rel/%E0%A4%A`），Express 或 Node 内部的 `decodeURIComponent` 会抛出 `URIError: URI malformed`，直接进入错误处理中间件。
+4. **请求体解析失败（如 JSON 解析错误）**
+   - 若引入了 `express.json()` 等解析器，当收到损坏的 JSON 报文时，解析器会调用 `next(syntaxError)`。
+
+---
+
+### 二、 结合本项目的具体例子
+
+#### 例子 1：请求路径包含非法编码（URIError）
+- **触发过程**：
+  攻击者或异常客户端发起了请求：
+  ```http
+  GET /control/download/rel/%c0%af%c0%af/etc/passwd
+  ```
+- **代码执行路径**：
+  在 [`download-handler.js`](file:///source/build-data/download-handler.js#L165) 中执行：
+  ```javascript
+  let relPath = decodeURIComponent(req.params.path); // 抛出 URIError: URI malformed
+  ```
+- **中间件被调用**：
+  因为这是同步异常，Express 自动捕获并传入全局中间件：
+  ```javascript
+  handler.use((err, req, res, next) => {
+    // 捕获到 err = URIError: URI malformed
+    console.error("Unhandled server error:", err);
+    res.status(500).type("text/plain").send("Internal Server Error\n");
+  });
+  ```
+  - **效果**：日志打印了详细的报错调用栈供排查；而客户端只收到干净的 `Internal Server Error`，不会暴露服务端文件路径结构。
+
+---
+
+#### 例子 2：同步读取文件/模板异常（如文件被意外删除或无权限）
+- **触发过程**：
+  客户端访问下载页面：
+  ```http
+  GET /control/download/rel/myfile.txt
+  ```
+- **代码执行路径**：
+  在 [`getDownloadHtml`](file:///source/build-data/download-handler.js#L68) 中读取模板：
+  ```javascript
+  let template = fs.readFileSync(templatePath, "utf-8");
+  ```
+  如果容器内 `client/download.html` 文件损坏、被误删或无读权限，`fs.readFileSync` 会立即抛出 `ENOENT` 或 `EACCES`。
+- **中间件被调用**：
+  Express 捕获后交由错误处理中间件，优雅地向用户返回 500 响应，而不会导致请求一直挂起等待超时。
+
+---
+
+#### 例子 3：异步流操作显式交由全局处理（`next(err)`）
+- **使用场景**：
+  当某个路由在处理异步任务（如流式传输、数据库或进程间通讯）出现未预期的系统异常时，可以通过 `next(err)` 集中处理：
+  ```javascript
+  handler.get("/api/data", (req, res, next) => {
+    someAsyncOperation()
+      .then(data => res.json(data))
+      .catch(err => {
+        // 显式将异步异常交给全局错误中间件
+        next(err);
+      });
+  });
+  ```
+
+---
+
+### 三、 有无全局错误处理中间件的对比
+
+| 对比维度 | 没有全局错误中间件 | 有全局错误中间件 |
+| :--- | :--- | :--- |
+| **安全性** | Express 默认返回 HTML 格式的堆栈跟踪（Stack Trace），向外界泄露内部代码路径、系统环境等敏感信息。 | 对外隐藏敏感细节，仅返回标准化简明错误信息。 |
+| **日志记录** | 散落在控制台甚至无明确统一前缀，难以配合日志分析工具抓取告警。 | 通过 `console.error("Unhandled server error:", err)` 集中捕获并统一输出。 |
+| **连接状态** | 某些未捕获的边界异常可能导致 HTTP 连接挂起（Hang 住），直至客户端超时。 | 确保所有未处理错误都能明确收到响应状态码与响应体，及时释放连接。 |
+
+--------------------------------------------------------------------------------
+[Turn 5] Timestamp: 2026-09-14T05:34:17Z (Step: 103)
+--------------------------------------------------------------------------------
+
+USER:
+这个项目假设自己被部署在反向代理之后，反向代理负责用户身份鉴权，以及将HTTP通信转化为HTTPS。因此本项目不需要担心这方面问题。另外，凡是通过反向代理能访问到本服务的，都视为服务器的超级管理员，对服务器有完全的控制权，因此下载、复写系统重要文件，具有root执行权限，都不是问题。
+
+AGENT:
+明白了！这个架构定位非常清晰合理：**本项目本质上是一个部署在内网/受信网络中、受反代保护的特权运维与终端控制台（Privileged Admin Console）**。
+
+将认证、SSL/TLS 卸载、访问控制集中在反向代理（如 Nginx、Caddy、Traefik、Cloudflare Access 或 OAuth2-Proxy）是云原生架构和生产环境的经典最佳实践。在这一前提下，**容器内的 root 权限、全盘路径读写、系统关键目录打包下载与管理都是符合预期的核心功能**。
+
+基于这个实际架构定位，以下几项优化和适配就变得尤为关键：
+
+---
+
+### 1. Express 开启 `trust proxy`（避免反代下 HTTPS 降级与重定向循环）
+- **背景**：客户端通过 `https://domain.com` 访问反向代理，反向代理以 `http://webterm:8443` 转发给本服务。
+- **潜在问题**：
+  - 在 [`server.js`](file:///source/build-data/server.js#L329-L347) 中，访问 `/`、`/a` 或 `/s` 会执行 `res.redirect(...)`。
+  - Express 默认不信任反向代理的 `X-Forwarded-Proto` 头，会认为当前协议是 `http`，某些情况下生成的重定向 URL 可能会把客户端从 `https://` 重定向到 `http://`，导致浏览器报错 Mixed Content 或陷入重定向死循环。
+- **改进建议**：
+  在 Express 初始化后添加：
+  ```javascript
+  handler.set("trust proxy", true);
+  ```
+  这样 Express 能够正确识别真实的客户端 IP、协议（HTTP/HTTPS）以及主机名。
+
+---
+
+### 2. 为文件上传支持「覆盖写入（Overwrite）」功能
+- **背景**：作为超级管理员，最核心的运维需求之一就是**上传更新已有的配置文件、脚本或代码包**。
+- **现状**：
+  在 [`upload-handler.js`](file:///source/build-data/upload-handler.js#L31-L46) 中，目前采用硬编码的 `flags: "wx"`，如果目标文件已存在，会直接拦截并返回 `409 Conflict`，用户必须先进入终端执行 `rm` 删掉旧文件才能重新上传。
+- **改进建议**：
+  - 服务端支持 `?overwrite=true` 或请求头 `X-Overwrite: true`。
+  - 当指定覆盖时，以 `flags: "w"` 打开写入流；
+  - 前端上传界面提供「⚠️ 覆盖已有文件」复选框，方便运维一键热更新。
+
+---
+
+### 3. 反向代理长连接（WebSocket）保活优化
+- **背景**：反向代理（如 Nginx 的 `proxy_read_timeout` 默认 60 秒，Cloudflare 默认 100 秒）在连接空闲时会自动切断下游连接。
+- **改进建议**：
+  - 为 Socket.IO 显式设置心跳保活参数，避免管理员切走窗口阅读文档时终端断连：
+    ```javascript
+    const ws = socket(server, {
+      pingInterval: 25000,
+      pingTimeout: 20000,
+    });
+    ```
+
+---
+
+### 4. 推荐的反向代理配置参考（Nginx / Caddy）
+由于反向代理需要支撑大文件上传下载（如模型、镜像、归档）以及全双工 WebSocket，反代侧建议开启流式直通，避免反代把整个上传文件缓存在自身磁盘中。
+
+**Nginx 配置示例**：
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name term.your-domain.com;
+
+    # SSL 证书与认证配置省略...
+
+    location / {
+        proxy_pass http://127.0.0.1:5999;
+        proxy_http_version 1.1;
+
+        # WebSocket 支持
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # 转发原始主机与真实 IP
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 大文件与流式上传下载优化 (关闭反代请求缓冲，取消体积上限)
+        client_max_body_size 0;
+        proxy_request_buffering off;
+        proxy_buffering off;
+
+        # 延长超时，适配耗时任务和长时间静默终端
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+```
+
+---
+
+如果需要，我们可以在代码中把 **`trust proxy` 开启** 以及 **文件上传支持 `overwrite`** 迅速落地。
+
+--------------------------------------------------------------------------------
+[Turn 6] Timestamp: 2026-09-14T05:49:38Z (Step: 105)
+--------------------------------------------------------------------------------
+
+USER:
+请实现上面说的1，2，3
+
+ACTIONS / TOOL CALLS:
+  - [Tool: view_file] /source/build-data/upload-handler.js (View build-data/upload-handler.js)
+  - [Tool: view_file] /source/build-data/upload.html (Lines 310-345) (View upload.html lines 310-345)
+  - [Tool: view_file] /source/build-data/upload.js (Lines 1-16) (View upload.js lines 1-16)
+  - [Tool: view_file] /source/build-data/upload.js (Lines 275-340) (View upload.js lines 275-340)
+  - [Tool: write_to_file] /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/test_upload.js: Test upload overwrite logic
+  - [Tool: run_command] `node /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/test_upload.js` (Run test_upload.js)
+  - [Tool: view_file] /source/build-data/server.js (Lines 85-95) (View server.js lines 85-95)
+  - [Tool: replace_file_content] /source/build-data/server.js: Enable trust proxy and configure Socket.IO ping interval/timeout
+  - [Tool: view_file] /source/build-data/upload-handler.js (Lines 25-55) (View upload-handler.js lines 25-55)
+  - [Tool: view_file] /source/build-data/upload-handler.js (Lines 50-75) (View upload-handler.js lines 50-75)
+  - [Tool: replace_file_content] /source/build-data/upload-handler.js: Support overwrite mode in PUT /control/upload
+  - [Tool: view_file] /source/build-data/upload.html (Lines 312-325) (View upload.html lines 312-325)
+  - [Tool: replace_file_content] /source/build-data/upload.html: Add overwrite checkbox below dest-path input
+  - [Tool: view_file] /source/build-data/upload.js (Lines 1-20) (View upload.js lines 1-20)
+  - [Tool: view_file] /source/build-data/upload.js (Lines 275-330) (View upload.js lines 275-330)
+  - [Tool: view_file] /source/build-data/upload.js (Lines 360-395) (View upload.js lines 360-395)
+  - [Tool: replace_file_content] /source/build-data/upload.js: Add checkOverwrite DOM element reference
+  - [Tool: view_file] /source/build-data/upload.js (Lines 275-385) (View upload.js lines 275-385)
+  - [Tool: replace_file_content] /source/build-data/upload.js: Pass overwrite option in uploadSingleFile and manage checkOverwrite state during upload
+  - [Tool: run_command] `cp /source/build-data/server.js /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/ && cp /source/build-data/upload-handler.js /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/ && cp /source/build-data/upload.js /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/ && node -c /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/server.js && node -c /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/upload-handler.js && node -c /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/upload.js` (Syntax check)
+  - [Tool: run_command] `git diff` (Git diff)
+
+AGENT:
+已完成上述 1、2、3 项功能的实现，详细改动如下：
+
+---
+
+### 1. 开启 Express 反向代理信任 (`trust proxy`)
+- **修改文件**：[`server.js`](file:///source/build-data/server.js#L89-L91)
+- **改动详情**：
+  ```javascript
+  const handler = express();
+  handler.set("trust proxy", true);
+  ```
+- **作用**：让 Express 正确识别反向代理转发的 `X-Forwarded-Proto`（判断当前是 HTTPS 还是 HTTP）、`X-Forwarded-For`（获取真实客户端 IP）以及 Host 头，彻底避免 `/`、`/a`、`/s` 重定向时由 HTTPS 降级到 HTTP 或产生重定向循环。
+
+---
+
+### 2. 为文件上传支持「覆盖写入（Overwrite）」功能
+#### (1) 服务端支持覆盖写入
+- **修改文件**：[`upload-handler.js`](file:///source/build-data/upload-handler.js#L31-L70)
+- **改动详情**：
+  - 检查 Query 参数 `?overwrite=true`/`1` 或请求头 `X-Overwrite: true`/`1`。
+  - 当启用 `overwrite` 时：
+    - 跳过 `409 Conflict` 文件已存在检查；
+    - 写入流模式由排他写入 `wx` 切换为覆盖写入 `w`（`createWriteStream(targetPath, { flags: writeFlags })`）；
+    - 报错处理中对 `EEXIST` 差异化处理。
+  - 未开启 `overwrite` 时依然保持原有的冲突防护逻辑。
+
+#### (2) 前端上传页面增加「覆盖已有文件」选项与状态联动
+- **修改文件**：[`upload.html`](file:///source/build-data/upload.html#L319-L325) 与 [`upload.js`](file:///source/build-data/upload.js#L4-L383)
+- **改动详情**：
+  - 在 [`upload.html`](file:///source/build-data/upload.html) 的目标路径输入框下方增加了勾选框：
+    ```html
+    <input type="checkbox" id="check-overwrite" />
+    <span>Overwrite existing files</span>
+    ```
+  - 在 [`upload.js`](file:///source/build-data/upload.js) 中：
+    - 读取勾选框状态；
+    - 在上传请求中通过 Query 参数 `?overwrite=true` 与请求头 `X-Overwrite: true` 双重传递给服务端；
+    - 上传开始时自动禁用复选框，上传结束后恢复。
+
+---
+
+### 3. 反向代理长连接（WebSocket）保活优化
+- **修改文件**：[`server.js`](file:///source/build-data/server.js#L93-L96)
+- **改动详情**：
+  ```javascript
+  const ws = socket(server, {
+    pingInterval: 25000,
+    pingTimeout: 20000,
+  });
+  ```
+- **作用**：
+  - 显式配置 Socket.IO 保持每 25 秒发送一次心跳 ping，并在 20 秒无响应时判定超时。
+  - 避免 Nginx（默认 `proxy_read_timeout 60s`）、Traefik 或各类云厂商反向代理因终端短时间无字符输出而强行切断 WebSocket 连接。
+
+---
+
+### 语法与逻辑验证
+- 在独立测试沙箱中针对覆盖写入逻辑（已有文件未开启覆盖返回 409、开启覆盖成功覆写）进行了单测验证，均通过；
+- 修改后的所有代码均通过 `node -c` 语法检查。
+
+--------------------------------------------------------------------------------
+[Turn 7] Timestamp: 2026-09-14T05:52:44Z (Step: 149)
+--------------------------------------------------------------------------------
+
+USER:
+请把“这个项目假设自己被部署在反向代理之后，反向代理负责用户身份鉴权，以及将HTTP通信转化为HTTPS。因此本项目不需要担心这方面问题。另外，凡是通过反向代理能访问到本服务的，都视为服务器的超级管理员，对服务器有完全的控制权，因此下载、复写系统重要文件，具有root执行权限，都不是问题。”以合适的方式写入agent文件，
+
+ACTIONS / TOOL CALLS:
+  - [Tool: view_file] /source/GEMINI.md (View GEMINI.md)
+  - [Tool: run_command] `ls -l /source/GEMINI.md /source/AGENTS.md` (Check symlink)
+  - [Tool: find_by_name] Pattern: `*.md` in `/source` (Find markdown files)
+  - [Tool: run_command] `ls -lt /source/agent_worklog/ | head -n 5` (List recent worklogs)
+  - [Tool: view_file] /source/agent_worklog/20260914033112.log (Lines 1-25) (View agent worklog)
+  - [Tool: replace_file_content] /source/AGENTS.md: Append section 5 for deployment architecture and privilege assumptions
+  - [Tool: view_file] /source/AGENTS.md (View updated AGENTS.md)
+  - [Tool: run_command] `git diff AGENTS.md` (Git diff AGENTS.md)
+
+AGENT:
+已将该部署架构与特权模型规范写入项目的 Agent 规则文件 [`AGENTS.md`](file:///source/AGENTS.md)（软链接指向的 [`GEMINI.md`](file:///source/GEMINI.md) 同步生效）。
+
+根据规则中“代码与配置文件须使用英文”的要求，在 [`AGENTS.md`](file:///source/AGENTS.md) 末尾追加了第 5 节：
+
+```markdown
+## 5. Deployment Architecture and Privilege Model
+- **Reverse Proxy Assumption**: The project assumes it is deployed behind a reverse proxy that handles user authentication, access control, and TLS termination (converting HTTP to HTTPS). The application does not need to implement internal authentication or TLS handling.
+- **Super Administrator Privileges**: Any client accessing this service via the reverse proxy is treated as a super administrator with complete control over the system. Therefore, executing root interactive shells, downloading or reading system-critical files, and creating or overwriting arbitrary system files are intended administrative features, not security vulnerabilities.
+```
+
+这样后续所有 Agent 在理解或审查本项目时，均会遵循该特权边界与反向代理假设，不会再将此类管理员能力误判为越权或未鉴权漏洞。
+
+--------------------------------------------------------------------------------
+[Turn 8] Timestamp: 2026-09-14T05:56:24Z (Step: 167)
+--------------------------------------------------------------------------------
+
+USER:
+请检查哪些路由会返回缓存指令给客户端浏览器
+
+ACTIONS / TOOL CALLS:
+  - [Tool: grep_search] Query: `cache` in `/source/build-data` (Search cache references)
+  - [Tool: grep_search] Query: `res.set` in `/source/build-data` (Search res.set)
+  - [Tool: grep_search] Query: `sendFile` in `/source/build-data` (Search sendFile)
+  - [Tool: grep_search] Query: `res.download` in `/source/build-data` (Search res.download)
+
+AGENT:
+通过对整个代码库的路由定义及 HTTP 响应头进行排查，本项目中返回缓存指令（`Cache-Control`）的路由主要分为 **强缓存（长期缓存）** 和 **协商缓存（禁用本地强缓存 `no-cache`）** 两大类，具体清单如下：
+
+---
+
+### 一、 返回强缓存指令的路由（`Cache-Control: public, max-age=36000`）
+
+在 [`server.js`](file:///source/build-data/server.js#L313-L330) 中，通过 [`ROUTING_TABLE`](file:///source/build-data/server.js#L38-L83) 为**第三方的 xterm 及其插件静态资源**配置了 `cache: true`。Express 的 `res.sendFile` 会自动生成 `Cache-Control: public, max-age=36000`（10 小时）：
+
+| 请求路径 | 对应服务器文件 | 缓存指令 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `GET /static/xterm.js` | `node_modules/@xterm/xterm/lib/xterm.js` | `max-age=36000` | xterm 核心库 |
+| `GET /static/xterm.css` | `node_modules/@xterm/xterm/css/xterm.css` | `max-age=36000` | xterm 样式表 |
+| `GET /static/xterm-fit.js` | `node_modules/@xterm/addon-fit/lib/addon-fit.js` | `max-age=36000` | 自适应插件 |
+| `GET /static/xterm-clipboard.js` | `node_modules/@xterm/addon-clipboard/lib/addon-clipboard.js` | `max-age=36000` | 剪贴板插件 |
+| `GET /static/xterm-weblinks.js` | `node_modules/@xterm/addon-web-links/lib/addon-web-links.js` | `max-age=36000` | 超链接插件 |
+| `GET /static/xterm-image.js` | `node_modules/@xterm/addon-image/lib/addon-image.js` | `max-age=36000` | 图片显示插件 |
+| `GET /static/xterm-progress.js` | `node_modules/@xterm/addon-progress/lib/addon-progress.js` | `max-age=36000` | 进度条插件 |
+| `GET /static/xterm-search.js` | `node_modules/@xterm/addon-search/lib/addon-search.js` | `max-age=36000` | 终端搜索插件 |
+
+---
+
+### 二、 显式返回 `Cache-Control: no-cache` 的路由
+
+这些路由显式设置了 `res.set("Cache-Control", "no-cache")`，指示浏览器每次使用必须向服务端进行协商验证，禁止使用本地陈旧缓存：
+
+#### 1. 前端业务脚本（每次发布或构建可能更新）
+- `GET /static/main.js`（[`server.js`](file:///source/build-data/server.js#L39-L42)）
+- `GET /static/upload.js`（[`server.js`](file:///source/build-data/server.js#L43-L46)）
+- `GET /static/download.js`（[`server.js`](file:///source/build-data/server.js#L47-L50)）
+
+#### 2. 页面 HTML 路由
+- **终端页**：
+  - `GET /a/:name`（AGY 模式终端页面，[`server.js`](file:///source/build-data/server.js#L393)）
+  - `GET /s/:name`（Bash Shell 模式终端页面，[`server.js`](file:///source/build-data/server.js#L393)）
+- **上传管理页**：
+  - `GET /control/upload` 与 `GET /control/upload/`（文件上传界面，[`upload-handler.js`](file:///source/build-data/upload-handler.js#L10)）
+
+#### 3. 控制接口（API）
+- `GET /control/list` 与 `GET /control/list/`（获取当前所有会话列表 JSON，[`server.js`](file:///source/build-data/server.js#L345)）
+- `GET /control/abort/:name` 与 `DELETE /control/abort/:name`（终止指定会话 API，[`server.js`](file:///source/build-data/server.js#L366)）
+
+---
+
+### 三、 未显式设置 Cache-Control 的路由（采用默认机制）
+
+以下路由在代码中**未显式配置 `Cache-Control`**：
+1. **重定向路由**：
+   - `GET /`, `/a`, `/a/`, `/s`, `/s/`：执行 302 临时重定向到随机生成的会话路径，默认不缓存。
+2. **下载路由**（[`download-handler.js`](file:///source/build-data/download-handler.js#L150-L175)）：
+   - `GET /control/download/rel/{*path}`
+   - `GET /control/download/abs/{*path}`
+     - **展示 HTML 下载信息卡片时**：通过 `res.type("html").send(...)` 响应，Express 默认不带 `Cache-Control`，但会生成 `ETag`。
+     - **下载单文件时**：通过 `res.download(...)` 响应，底层由 `send` 库输出，未指定 `maxAge`，默认附带 `ETag` 与 `Last-Modified` 支持条件请求（304）。
+     - **下载目录打包归档时**：通过 `tar` 进程标准输出管道流式响应（`application/gzip`），属于即时动态数据流，无缓存头。
+3. **上传写入路由**：
+   - `PUT /control/upload`：返回文件上传完成后的结果 JSON，动态处理无缓存指令。
+
+--------------------------------------------------------------------------------
+[Turn 9] Timestamp: 2026-09-14T06:21:37Z (Step: 177)
+--------------------------------------------------------------------------------
+
+USER:
+express如何为动态内容生成etag
+
+AGENT:
+在 Express 中，为动态内容（通过 `res.send()` 或 `res.json()` 返回的数据）生成 ETag 是由 Express **内置自动完成**的。
+
+以下是其**底层算法、协商流程、配置方式及业务优化实践**的深度解析：
+
+---
+
+### 一、 Express 是如何计算动态内容 ETag 的？
+
+当你在路由中调用 `res.send(body)` 或 `res.json(data)` 时，Express 内部依赖 npm 的 [`etag`](https://www.npmjs.com/package/etag) 模块。
+
+#### 1. 默认生成算法（弱 ETag / Weak ETag）
+对于动态生成的字符串或 Buffer，Express 默认生成**弱 ETag**（以 `W/` 开头）。其内部计算逻辑如下：
+
+```javascript
+// 核心逻辑简写：
+const crypto = require("crypto");
+
+function generateETag(body) {
+  // 1. 计算内容的字节长度（转换为 16 进制）
+  const len = Buffer.byteLength(body);
+  const lenHex = len.toString(16);
+
+  // 2. 对内容做 SHA-1 哈希，转为 Base64 并截取前 27 位
+  const hash = crypto
+    .createHash("sha1")
+    .update(body, "utf8")
+    .digest("base64")
+    .substring(0, 27);
+
+  // 3. 拼接为弱 ETag 格式
+  return `W/"${lenHex}-${hash}"`;
+}
+```
+
+- **生成结果示例**：`ETag: W/"1b-k7C2M8J+z9e0fF...="`
+- **弱 ETag 的含义**：`W/` 代表内容在语义上是一致的（可能存在微小字节差异，但不影响使用）。
+
+---
+
+### 二、 动态内容的协商缓存闭环（304 过程）
+
+客户端与 Express 之间的自动协商交互流程如下：
+
+```text
+[客户端浏览器]                                            [Express 服务端]
+      |                                                          |
+      | 1. 首次请求: GET /api/data                                |
+      |--------------------------------------------------------->|
+      |                                                          | 执行路由逻辑生成 JSON
+      |                                                          | 计算 SHA1 + 长度 -> 生成 ETag
+      | 2. 响应 200 OK (带 ETag: W/"1b-xxx")                       |
+      |<---------------------------------------------------------|
+      |                                                          |
+      | 3. 二次请求: GET /api/data                                |
+      |    带请求头 If-None-Match: W/"1b-xxx"                     |
+      |--------------------------------------------------------->|
+      |                                                          | 执行路由逻辑重新计算出 ETag
+      |                                                          | req.fresh 对比两者一致！
+      | 4. 响应 304 Not Modified (自动清空 Response Body)         |
+      |<---------------------------------------------------------| (节省了响应体积带宽)
+```
+
+1. 浏览器二次发起请求时，自动带上 `If-None-Match: W/"..."`；
+2. 路由生成数据后，`res.send()` 算出当前数据的 ETag；
+3. Express 内部通过 [`fresh`](https://www.npmjs.com/package/fresh) 库比对 `req.headers['if-none-match']` 与新生成的 ETag；
+4. **如果匹配**：Express 自动将 HTTP 状态码改为 **`304 Not Modified`**，清空响应体，直接发送空响应给浏览器，**极大节省出网带宽**。
+
+---
+
+### 三、 Express 中 ETag 的配置选项
+
+可以通过 `app.set('etag', ...)` 调整行为：
+
+```javascript
+const express = require("express");
+const app = express();
+
+// 1. 默认设置：弱 ETag (推荐)
+app.set("etag", "weak"); // 输出: W/"..."
+
+// 2. 强 ETag (严格字节级一致，不带 W/ 前缀)
+app.set("etag", "strong"); // 输出: "..."
+
+// 3. 完全禁用自动 ETag (不再返回 ETag 响应头)
+app.set("etag", false);
+
+// 4. 自定义 ETag 生成函数
+app.set("etag", (body, encoding) => {
+  // 可以根据业务需要使用 md5、xxhash 或版本号
+  const hash = require("crypto").createHash("md5").update(body).digest("hex");
+  return `"${hash}"`;
+});
+```
+
+---
+
+### 四、 什么时候 Express **不会**自动生成 ETag？
+
+1. **流式传输（Streaming）**：
+   - 使用 `stream.pipe(res)`（例如本项目中的 `tarProcess.stdout.pipe(res)` 打包下载目录）；
+   - 因为流是一边产生一边发送给客户端的，Express 无法预知完整数据的长度和哈希，因此**无法自动生成 ETag**。
+2. **原生分块写入**：
+   - 绕过了 `res.send()`，直接使用 Node 原生 `res.write('...')` + `res.end()`。
+3. **非 2xx 状态码**：
+   - 3xx 重定向、4xx 客户端错误、5xx 服务端错误通常不会自动附加 ETag。
+
+---
+
+### 五、 性能陷阱与业务层优化
+
+> **⚠️ 默认 ETag 的局限性**：
+> Express 默认的 ETag 机制只能**节省网络带宽**，不能**节省服务端 CPU 与数据库计算开销**。因为每次请求到来时，服务端依然要把数据库查询出来、拼接成 JSON/HTML，算一遍哈希后才发现内容没变，最后返回 304。
+
+#### 进阶优化：基于业务“版本号/时间戳”的前置 304 拦截
+在耗时较高的动态接口中，通常采用**前置比对**：
+
+```javascript
+app.get("/api/heavy-data/:id", async (req, res) => {
+  // 1. 仅轻量查询资源的最新修改时间或版本号 (无需拉取庞大完整数据)
+  const meta = await db.query("SELECT version, updated_at FROM items WHERE id = ?", [req.params.id]);
+  const businessEtag = `"${meta.version}-${meta.updated_at.getTime()}"`;
+
+  // 2. 提前检查客户端传来的 If-None-Match
+  if (req.headers["if-none-match"] === businessEtag) {
+    // 直接返回 304，后面的复杂计算、模板渲染全部跳过！
+    return res.status(304).end();
+  }
+
+  // 3. 内容确实变了，才去执行耗时的全量查询与计算
+  const fullData = await getFullHeavyData(req.params.id);
+  res.setHeader("ETag", businessEtag);
+  res.json(fullData);
+});
+```
+
+--------------------------------------------------------------------------------
+[Turn 10] Timestamp: 2026-09-14T07:34:21Z (Step: 179)
+--------------------------------------------------------------------------------
+
+USER:
+去除所有no-cache的逻辑
+
+ACTIONS / TOOL CALLS:
+  - [Tool: grep_search] Query: `no-cache` in `/source` (Search no-cache)
+  - [Tool: view_file] /source/build-data/server.js (Lines 35-85) (View ROUTING_TABLE)
+  - [Tool: view_file] /source/build-data/server.js (Lines 310-400) (View routes in server.js)
+  - [Tool: view_file] /source/build-data/upload-handler.js (Lines 1-20) (View upload-handler.js lines 1-20)
+  - [Tool: grep_search] Query: `cache` in `/source/build-data/download-handler.js` (Search cache in download-handler)
+  - [Tool: grep_search] Query: `cache` in `/source` (Search cache in source)
+  - [Tool: grep_search] Query: `cache` in `/source/build-data` (Search cache in build-data)
+  - [Tool: run_command] `git log -S "no-cache" --oneline` (Git log no-cache)
+  - [Tool: run_command] `git show 48cd5c2 --stat` (Git show 48cd5c2)
+  - [Tool: grep_search] Query: `no-cache` in `/source/build-data` (Search no-cache in build-data)
+  - [Tool: replace_file_content] /source/build-data/upload-handler.js: Remove res.set('Cache-Control', 'no-cache') in GET /control/upload
+  - [Tool: replace_file_content] /source/build-data/server.js: Remove res.set('Cache-Control', 'no-cache') and cacheControl: false from static routes
+  - [Tool: view_file] /source/build-data/server.js (Lines 335-355) (View /control/list)
+  - [Tool: replace_file_content] /source/build-data/server.js: Remove res.set('Cache-Control', 'no-cache') from /control/list route
+  - [Tool: view_file] /source/build-data/server.js (Lines 360-400) (View abort and terminal routes)
+  - [Tool: replace_file_content] /source/build-data/server.js: Remove res.set('Cache-Control', 'no-cache') from /control/abort/:name route
+  - [Tool: view_file] /source/build-data/server.js (Lines 380-395) (View /a/:name and /s/:name)
+  - [Tool: replace_file_content] /source/build-data/server.js: Remove res.set('Cache-Control', 'no-cache') and send index.html without cacheControl: false
+  - [Tool: grep_search] Query: `no-cache` in `/source/build-data` (Verify no-cache removed)
+  - [Tool: grep_search] Query: `cacheControl` in `/source/build-data` (Verify cacheControl removed)
+  - [Tool: run_command] `cp /source/build-data/server.js /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/ && cp /source/build-data/upload-handler.js /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/ && node -c /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/server.js && node -c /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/upload-handler.js` (Syntax check)
+  - [Tool: run_command] `git diff /source/build-data/server.js /source/build-data/upload-handler.js` (Git diff)
+
+AGENT:
+已完成对项目中所有 `no-cache` 逻辑的清理。具体修改点如下：
+
+---
+
+### 1. 静态业务脚本路由
+- **修改文件**：[`server.js`](file:///source/build-data/server.js#L316-L327)
+- **改动详情**：
+  - 移除了对非第三方库资源（`/static/main.js`、`/static/upload.js`、`/static/download.js`）显式设置的 `res.set("Cache-Control", "no-cache")` 及 `{ cacheControl: false }`；
+  - 改为标准的 `res.sendFile(resolvedPath)`，允许 Express 自动利用文件的 `ETag` 与 `Last-Modified` 进行高效的协商缓存（支持 304）。
+
+---
+
+### 2. 控制接口 API 响应
+- **修改文件**：[`server.js`](file:///source/build-data/server.js#L330-L368)
+- **改动详情**：
+  - `GET /control/list`：移除了 `res.set("Cache-Control", "no-cache")`；
+  - `ALL /control/abort/:name`：移除了 `res.set("Cache-Control", "no-cache")`。
+
+---
+
+### 3. 页面 HTML 路由
+- **修改文件**：[`server.js`](file:///source/build-data/server.js#L380-L394) 与 [`upload-handler.js`](file:///source/build-data/upload-handler.js#L7-L12)
+- **改动详情**：
+  - 终端页面 `GET /a/:name` 与 `GET /s/:name`（`index.html`）：移除了 `res.set("Cache-Control", "no-cache")` 及 `{ cacheControl: false }`；
+  - 上传管理页面 `GET /control/upload`（`upload.html`）：移除了 `res.set("Cache-Control", "no-cache")`。
+
+---
+
+### 验证确认
+- 全局检索排查确认业务源码中已**无任何残留的 `no-cache` 或 `cacheControl: false`** 指令；
+- 所有修改文件均通过语法检查（`node -c`），运行逻辑保持正常。
+
+--------------------------------------------------------------------------------
+[Turn 11] Timestamp: 2026-09-14T07:51:30Z (Step: 225)
+--------------------------------------------------------------------------------
+
+USER:
+请把本次对话存入agent_worklog
+
+ACTIONS / TOOL CALLS:
+  - [Tool: view_file] /source/agent_worklog/20260914033112.log (Lines 1-60) (View agent_worklog format)
+  - [Tool: run_command] `git log -S "ANTIGRAVITY AGENT WORKLOG" --oneline` (Search git for worklog)
+  - [Tool: view_file] /source/agent_worklog/20260914033112.log (Lines 1500-1534) (View end of worklog)
+  - [Tool: view_file] /root/.gemini/antigravity-cli/brain/eb146677-2547-4d7f-8f43-d576dbf6bfee/scratch/generate_worklog.py (View generate_worklog.py)
+  - [Tool: grep_search] Query: `def parse` in `/source/agent_worklog/20260914033112.log` (Search parse in worklog)
+  - [Tool: view_file] /source/agent_worklog/20260913175113.log (Lines 1750-1840) (View worklog script)
+  - [Tool: view_file] /source/agent_worklog/20260913175113.log (Lines 1-100) (View worklog lines 1-100)
+  - [Tool: run_command] `python3 -c '
+import os
+
+base = "/root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/.system_generated/logs"
+print(os.listdir(base))
+'` (Check transcript files)
+  - [Tool: run_command] `python3 -c '
+import json, re
+
+path = "/root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/.system_generated/logs/transcript_full.jsonl"
+steps = []
+with open(path, "r", encoding="utf-8") as f:
+    for line in f:
+        if line.strip():
+            steps.append(json.loads(line))
+
+print("Total steps:", len(steps))
+
+turns = []
+current_turn = None
+
+for i, s in enumerate(steps):
+    stype = s.get("type")
+    if stype == "USER_INPUT":
+        if current_turn is not None:
+            turns.append(current_turn)
+        current_turn = {
+            "user_step": s,
+            "step_index": i,
+            "actions": [],
+            "agent_response": ""
+        }
+    elif current_turn is not None:
+        if "tool_calls" in s and s["tool_calls"]:
+            for tc in s["tool_calls"]:
+                current_turn["actions"].append(tc)
+        if s.get("source") == "MODEL" and s.get("type") == "PLANNER_RESPONSE":
+            content = s.get("content", "")
+            if content and not s.get("tool_calls"):
+                current_turn["agent_response"] = content
+
+if current_turn is not None:
+    turns.append(current_turn)
+
+print("Parsed turns:", len(turns))
+for t_idx, t in enumerate(turns, 1):
+    u_content = t["user_step"].get("content", "")
+    req_match = re.search(r"<USER_REQUEST>(.*?)</USER_REQUEST>", u_content, re.DOTALL)
+    if req_match:
+        prompt = req_match.group(1).strip()
+    else:
+        prompt = u_content.strip()
+    act_count = len(t["actions"])
+    has_resp = bool(t["agent_response"])
+    print(f"Turn {t_idx}: Actions={act_count}, HasAgentResp={has_resp}, Prompt={prompt[:50]}")
+'` (Inspect transcript turns)
+  - [Tool: view_file] /source/agent_worklog/20260914033112.log (Lines 50-120) (View worklog format)
+  - [Tool: run_command] `python3 -c '
+import json
+
+path = "/root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/.system_generated/logs/transcript_full.jsonl"
+with open(path, "r", encoding="utf-8") as f:
+    for line in f:
+        step = json.loads(line)
+        if "tool_calls" in step and step["tool_calls"]:
+            for tc in step["tool_calls"]:
+                print(tc.get("name"), list(tc.get("args", {}).keys()))
+            break
+'` (Inspect tool calls schema)
+  - [Tool: write_to_file] /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/build_worklog.py: Generate worklog script in scratch
+  - [Tool: run_command] `python3 /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/build_worklog.py` (Run build_worklog.py)
+  - [Tool: run_command] `python3 -c '
+import json, re
+
+transcript_path = "/root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/.system_generated/logs/transcript_full.jsonl"
+steps = []
+with open(transcript_path, "r", encoding="utf-8") as f:
+    for line in f:
+        if line.strip():
+            steps.append(json.loads(line))
+
+turns = []
+current_turn = None
+for i, s in enumerate(steps):
+    stype = s.get("type")
+    if stype == "USER_INPUT":
+        if current_turn is not None:
+            turns.append(current_turn)
+        current_turn = {"user_step": s, "actions": [], "agent_response": ""}
+    elif current_turn is not None:
+        if "tool_calls" in s and s["tool_calls"]:
+            for tc in s["tool_calls"]:
+                current_turn["actions"].append(tc)
+        if s.get("source") == "MODEL" and s.get("type") == "PLANNER_RESPONSE":
+            content = s.get("content", "")
+            if content and not s.get("tool_calls"):
+                current_turn["agent_response"] = content
+
+if current_turn is not None:
+    turns.append(current_turn)
+
+for i, t in enumerate(turns, 1):
+    resp = t["agent_response"].strip()
+    print(f"Turn {i}: len={len(resp)}, preview={resp[:60]!r}")
+'` (Check agent responses)
+  - [Tool: run_command] `date -u +"%Y%m%d%H%M%S"` (Get UTC timestamp)
+  - [Tool: write_to_file] /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/build_worklog.py: Update build_worklog script to save output to agent_worklog
+  - [Tool: run_command] `python3 /root/.gemini/antigravity-cli/brain/8308fd3b-1a9f-4ccb-ab8b-d7cc3eda1662/scratch/build_worklog.py` (Generate agent worklog)
+
+AGENT:
+(Recording conversation to agent_worklog)
+

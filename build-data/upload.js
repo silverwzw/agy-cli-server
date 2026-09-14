@@ -1,6 +1,7 @@
 const dropZone = document.getElementById("drop-zone");
 const fileInput = document.getElementById("file-input");
 const destPathInput = document.getElementById("dest-path");
+const checkOverwrite = document.getElementById("check-overwrite");
 const fileInfo = document.getElementById("file-info");
 const summaryCount = document.getElementById("summary-count");
 const summarySize = document.getElementById("summary-size");
@@ -274,12 +275,16 @@ fileList.addEventListener("click", (e) => {
   }
 });
 
-function uploadSingleFile(file, target, onProgress) {
+function uploadSingleFile(file, target, onProgress, overwrite = false) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("PUT", "/control/upload?path=" + encodeURIComponent(target));
+    const url = `/control/upload?path=${encodeURIComponent(target)}${overwrite ? "&overwrite=true" : ""}`;
+    xhr.open("PUT", url);
     xhr.setRequestHeader("X-File-Path", encodeURI(target));
     xhr.setRequestHeader("X-File-Name", encodeURI(file.name));
+    if (overwrite) {
+      xhr.setRequestHeader("X-Overwrite", "true");
+    }
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
@@ -314,9 +319,11 @@ async function startUpload() {
   let queue = selectedFiles.filter(item => item.status !== "done");
   if (queue.length === 0) return;
 
+  const overwrite = Boolean(checkOverwrite?.checked);
   isUploading = true;
   btnUpload.disabled = true;
   destPathInput.disabled = true;
+  if (checkOverwrite) checkOverwrite.disabled = true;
   btnClear.disabled = true;
   resultBox.style.display = "none";
   progressContainer.style.display = "block";
@@ -352,7 +359,7 @@ async function startUpload() {
         item.pct = item.file.size > 0 ? Math.min(100, Math.round((loaded / item.file.size) * 100)) : 100;
         updateItemBadge(itemIdx, "uploading", `${item.pct}%`);
         updateOverallProgress(completedBytesBeforeCurrent + loaded);
-      });
+      }, overwrite);
 
       item.status = "done";
       item.pct = 100;
@@ -373,6 +380,7 @@ async function startUpload() {
   isUploading = false;
   btnUpload.disabled = false;
   destPathInput.disabled = false;
+  if (checkOverwrite) checkOverwrite.disabled = false;
   btnClear.disabled = false;
   renderFileList();
 

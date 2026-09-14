@@ -37,6 +37,16 @@ function formatBytes(bytes) {
   return (bytes / Math.pow(k, i)).toFixed(2) + " " + sizes[i];
 }
 
+function escapeHtml(str) {
+  if (str == null) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 function getDownloadHtml(targetFile, stat, rawUrl, ROOT_DIR) {
   const isDirectory = stat.isDirectory();
   const baseName = path.basename(targetFile) || "root";
@@ -59,20 +69,20 @@ function getDownloadHtml(targetFile, stat, rawUrl, ROOT_DIR) {
   const displayTarget = isDirectory ? `${targetFile} (directory archive)` : targetFile;
   const formattedSize = isDirectory ? `${formatBytes(stat.size)} (directory entry)` : formatBytes(stat.size);
   const replacements = {
-    FILENAME: filename,
-    TARGET_FILE: displayTarget,
-    FORMATTED_SIZE: formattedSize,
-    RAW_SIZE: String(stat.size),
-    MODE_OCTAL: modeOctal,
-    USER_NAME: userName,
-    GROUP_NAME: groupName,
-    UID: String(uid),
-    GID: String(gid),
-    DIRECT_DOWNLOAD_URL: directDownloadUrl,
+    FILENAME: escapeHtml(filename),
+    TARGET_FILE: escapeHtml(displayTarget),
+    FORMATTED_SIZE: escapeHtml(formattedSize),
+    RAW_SIZE: escapeHtml(String(stat.size)),
+    MODE_OCTAL: escapeHtml(modeOctal),
+    USER_NAME: escapeHtml(userName),
+    GROUP_NAME: escapeHtml(groupName),
+    UID: escapeHtml(String(uid)),
+    GID: escapeHtml(String(gid)),
+    DIRECT_DOWNLOAD_URL: escapeHtml(directDownloadUrl),
     COMMANDS_STYLE: commandsStyle,
-    CHMOD_CMD: chmodCmd,
-    CHOWN_NAME_CMD: chownNameCmd,
-    CHOWN_ID_CMD: chownIdCmd,
+    CHMOD_CMD: escapeHtml(chmodCmd),
+    CHOWN_NAME_CMD: escapeHtml(chownNameCmd),
+    CHOWN_ID_CMD: escapeHtml(chownIdCmd),
   };
 
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => replacements[key] ?? "");
@@ -189,4 +199,5 @@ module.exports = {
   streamDirectoryArchive,
   getDownloadHtml,
   getUserAndGroup,
+  escapeHtml,
 };

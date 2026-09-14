@@ -20,3 +20,8 @@
 - **No Direct Execution in Development**: Strictly prohibit running application code directly within the development environment (`/source`).
 - **Testing via Dedicated Temporary Directory**: If code needs to be executed or tested, copy the required files to a dedicated temporary test directory mimicking the expected runtime structure.
 
+## 5. Deployment Architecture and Privilege Model
+- **Reverse Proxy Assumption**: The project assumes it is deployed behind a reverse proxy that handles user authentication, access control, and TLS termination (converting HTTP to HTTPS). The application does not need to implement internal authentication or TLS handling.
+- **Super Administrator Privileges**: Any client accessing this service via the reverse proxy is treated as a super administrator with complete control over the system. Therefore, executing root interactive shells, downloading or reading system-critical files, and creating or overwriting arbitrary system files are intended administrative features, not security vulnerabilities.
+
+
