@@ -237,6 +237,76 @@
     .btn-remove:hover {
       color: #ef4444;
     }
+    .btn-rename {
+      background: transparent;
+      border: 1px solid #475569;
+      color: #94a3b8;
+      font-size: 11px;
+      border-radius: 4px;
+      padding: 2px 6px;
+      cursor: pointer;
+      line-height: 1.2;
+      transition: all 0.15s ease;
+    }
+    .btn-rename:hover {
+      border-color: #38bdf8;
+      color: #38bdf8;
+    }
+    .rename-container {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      margin: 2px 0;
+    }
+    .input-rename {
+      flex: 1;
+      padding: 3px 6px;
+      background: #0f172a;
+      border: 1px solid #38bdf8;
+      border-radius: 4px;
+      color: #f8fafc;
+      font-family: monospace;
+      font-size: 12px;
+      outline: none;
+      min-width: 120px;
+    }
+    .btn-save-rename {
+      background: #0284c7;
+      border: none;
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 500;
+      border-radius: 4px;
+      padding: 3px 8px;
+      cursor: pointer;
+      line-height: 1.2;
+      transition: background 0.15s ease;
+    }
+    .btn-save-rename:hover {
+      background: #0369a1;
+    }
+    .btn-cancel-rename {
+      background: transparent;
+      border: 1px solid #475569;
+      color: #94a3b8;
+      font-size: 11px;
+      border-radius: 4px;
+      padding: 2px 6px;
+      cursor: pointer;
+      line-height: 1.2;
+      transition: all 0.15s ease;
+    }
+    .btn-cancel-rename:hover {
+      color: #e2e8f0;
+      border-color: #64748b;
+    }
+    .original-name {
+      font-size: 11px;
+      color: #64748b;
+      font-weight: normal;
+      margin-left: 4px;
+    }
     .btn-upload {
       width: 100%;
       padding: 12px;
@@ -311,15 +381,15 @@
 
   <div class="card">
     <div class="form-group">
-      <label for="dest-path">Target Directory or Full File Path</label>
+      <label for="dest-path">Target Directory</label>
       <input type="text" id="dest-path" value="/agy" placeholder="/agy or /agy/subfolder" />
-      <div class="form-hint">For multiple files, destination is treated as the target directory.</div>
+      <div class="form-hint">Destination directory where files will be uploaded.</div>
     </div>
 
     <div class="form-group" style="margin-top: -8px; margin-bottom: 18px;">
       <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #cbd5e1; font-size: 13px; font-weight: normal; user-select: none;">
         <input type="checkbox" id="check-overwrite" style="cursor: pointer; width: 16px; height: 16px; accent-color: #0284c7;" />
-        <span>Overwrite existing files</span>
+        <span>Replace existing files</span>
       </label>
     </div>
 

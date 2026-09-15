@@ -27,8 +27,8 @@ function createUploadRouter({ ROOT_DIR, WORK_DIR }) {
       targetPath = path.join(targetPath, defaultFilename);
     }
 
-    const overwriteQuery = req.query.overwrite;
-    const overwriteHeader = req.headers["x-overwrite"];
+    const overwriteQuery = req.query.override || req.query.overwrite || req.query.allow_override;
+    const overwriteHeader = req.headers["x-override"] || req.headers["x-overwrite"] || req.headers["x-allow-override"];
     const allowOverwrite =
       overwriteQuery === "true" ||
       overwriteQuery === "1" ||

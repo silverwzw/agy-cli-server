@@ -1,3 +1,7 @@
+// ===============================================
+//                 Global Setup
+// ===============================================
+
 const pathParts = window.location.pathname.split("/").filter(Boolean);
 let sessionMode = "";
 let sessionName = "";
@@ -33,14 +37,12 @@ if (!sessionName) {
 
 document.title = `${sessionName} - Web Terminal`;
 
-const socket = io({
-  query: {
-    mode: sessionMode,
-    name: sessionName,
-  },
-});
+// ===============================================
+//                 xterm Setup
+// ===============================================
 
 const term = new Terminal({
+  // Search addon relies on proposed API
   allowProposedApi: true,
 });
 
@@ -66,23 +68,32 @@ term.loadAddon(addon_search);
 term.open(term_div);
 addon_fit.fit();
 
+let debounceTimerHandle = null;
+window.addEventListener('resize', () => {
+  // Handler must be registered after terminal has been attached to DOM
+  clearTimeout(debounceTimerHandle);
+  debounceTimerHandle = setTimeout(() => {
+    addon_fit.fit();
+  }, 120);
+});
+
+// ===============================================
+//                 Socket Setup
+// ===============================================
+
+const socket = io({
+  query: {
+    mode: sessionMode,
+    name: sessionName,
+  },
+});
+
+//
+// == Connection Management ==
+//
+
 socket.on("connect", () => {
   console.log(`socket.io: connected via ${socket.io.engine.transport.name} mode`); 
-});
-
-socket.on("s.joinSuccess", () => {
-  addon_fit.fit();
-  if (!isAborted) {
-    socket.emit("t.resize", { cols: term.cols, rows: term.rows });
-  }
-});
-
-socket.io.engine.on("upgrade", (transport) => {
-  console.log(`socket.io: transport upgraded to ${transport.name} mode`);
-});
-
-socket.io.engine.on("upgradeError", (err) => {
-  console.error("Socket.IO upgrade error:", err);
 });
 
 socket.on("connect_error", (err) => {
@@ -95,11 +106,43 @@ socket.on("error", (err) => {
   showError(err);
 });
 
+socket.io.engine.on("upgrade", (transport) => {
+  console.log(`socket.io: transport upgraded to ${transport.name} mode`);
+});
+
+socket.io.engine.on("upgradeError", (err) => {
+  console.error("Socket.IO upgrade error:", err);
+});
+
+//
+// == Socket <-> xTerm ==
+//
+
 socket.on("t.s2c", (data) => {
   term.write(data);
 });
 
+const onDataHandler = term.onData((data) => {
+  socket.emit("t.c2s", data);
+});
+
+const onResizeHandler = term.onResize((size) => {
+  socket.emit("t.resize", size);
+});
+
+
+//
+// == Session Management ==
+//
+
 let isAborted = false;
+
+socket.on("s.joinSuccess", () => {
+  addon_fit.fit();
+  if (!isAborted) {
+    socket.emit("t.resize", { cols: term.cols, rows: term.rows });
+  }
+});
 
 socket.on("s.aborted", () => {
   isAborted = true;
@@ -108,30 +151,11 @@ socket.on("s.aborted", () => {
   onResizeHandler.dispose();
 });
 
-const onDataHandler = term.onData((data) => {
-  if (isAborted) return;
-  socket.emit("t.c2s", data);
-});
-
-let debounceTimerHandle = null;
-window.addEventListener('resize', () => {
-  clearTimeout(debounceTimerHandle);
-  debounceTimerHandle = setTimeout(() => {
-    addon_fit.fit();
-  }, 120);
-});
-
-const onResizeHandler = term.onResize((size) => {
-  if (isAborted) return;
-  socket.emit("t.resize", size);
-});
-
 // =======================================================
 //                  Progress Addon UI Handling
 // =======================================================
 
 const progressBar = document.getElementById("progress-bar");
-const defaultTitle = document.title;
 
 addon_progress.onChange(({ state, value }) => {
   if (!progressBar) return;
@@ -139,31 +163,26 @@ addon_progress.onChange(({ state, value }) => {
     case 0:
       progressBar.style.opacity = "0";
       progressBar.style.width = "0%";
-      document.title = defaultTitle;
       break;
     case 1:
       progressBar.style.backgroundColor = "#38bdf8";
       progressBar.style.opacity = "1";
       progressBar.style.width = `${Math.min(Math.max(value, 0), 100)}%`;
-      document.title = `(${value}%) ${defaultTitle}`;
       break;
     case 2:
       progressBar.style.backgroundColor = "#ef4444";
       progressBar.style.opacity = "1";
       progressBar.style.width = `${value > 0 ? value : 100}%`;
-      document.title = `[!] (${value}%) ${defaultTitle}`;
       break;
     case 3:
       progressBar.style.backgroundColor = "#a855f7";
       progressBar.style.opacity = "1";
       progressBar.style.width = "100%";
-      document.title = `(...) ${defaultTitle}`;
       break;
     case 4:
       progressBar.style.backgroundColor = "#f59e0b";
       progressBar.style.opacity = "1";
       progressBar.style.width = `${value}%`;
-      document.title = `[Paused] (${value}%) ${defaultTitle}`;
       break;
   }
 });
@@ -250,12 +269,15 @@ searchClose.addEventListener("click", closeSearchBar);
 term.attachCustomKeyEventHandler((e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key?.toLowerCase() === "f" || e.code === "KeyF")) {
     e.preventDefault();
+    e.stopPropagation();
     if (e.type === "keydown") {
       openSearchBar();
     }
     return false;
   }
   if (e.key === "Escape" && isSearchBarOpen()) {
+    e.preventDefault();
+    e.stopPropagation();
     if (e.type === "keydown") {
       closeSearchBar();
     }
@@ -269,6 +291,7 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     openSearchBar();
   } else if (e.key === "Escape" && isSearchBarOpen()) {
+    e.preventDefault();
     closeSearchBar();
   }
 });

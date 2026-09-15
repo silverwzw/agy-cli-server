@@ -15,10 +15,15 @@ RUN \
     procps \
     python3 \
     vim \
-    wget && \
-  rm -rf /var/lib/apt/lists/*
+    wget
 
 RUN curl -fsSL https://antigravity.google/cli/install.sh | /bin/bash
+
+COPY ./build-data/settings.json       /root/.gemini/antigravity-cli/settings.json
+COPY ./build-data/init                /init
+
+RUN chmod u+x /init && \
+    echo 'alias agy="/root/.local/bin/agy --dangerously-skip-permissions"' >> /root/.bashrc
 
 WORKDIR /webterm
 
@@ -32,15 +37,9 @@ RUN npm i \
       @xterm/addon-search \
       node-pty \
       express \
-      socket.io 
+      socket.io
 
 RUN jq '.scripts = { start: "node server/entry.js" }' package.json | sponge package.json
-
-COPY ./build-data/settings.json       /root/.gemini/antigravity-cli/settings.json
-COPY ./build-data/init                /init
-
-RUN chmod u+x /init && \
-    echo 'alias agy="/root/.local/bin/agy --dangerously-skip-permissions"' >> /root/.bashrc
 
 COPY ./build-data/index.html          /webterm/client/index.html
 COPY ./build-data/upload.html         /webterm/client/upload.html
@@ -59,7 +58,7 @@ RUN npx --yes esbuild main.raw.js --minify --outfile=main.js && \
     npx --yes esbuild download.raw.js --minify --outfile=download.js && \
     npx --yes esbuild upload.raw.js --minify --outfile=upload.js
 
-# RUN apt-get clean
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 8443:termjs test port:8080
 EXPOSE 8443 8080

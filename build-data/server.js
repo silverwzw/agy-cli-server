@@ -106,6 +106,40 @@ const cleanedSessions = new Set();
 
 
 
+function extractSocketIp(socket) {
+  let ip =
+    socket.handshake?.headers?.["x-real-ip"] ||
+    socket.handshake?.headers?.["x-forwarded-for"] ||
+    socket.handshake?.address ||
+    socket.conn?.remoteAddress ||
+    "unknown";
+  if (typeof ip === "string") {
+    ip = ip.split(",")[0].trim();
+    if (ip.startsWith("::ffff:")) {
+      ip = ip.substring(7);
+    }
+  }
+  return ip;
+}
+
+function extractSocketUrl(socket) {
+  const referer = socket.handshake?.headers?.referer;
+  if (referer) {
+    try {
+      const parsed = new URL(referer);
+      return parsed.pathname + parsed.search;
+    } catch (_) {
+      return referer;
+    }
+  }
+  const mode = socket.handshake?.query?.mode;
+  const name = socket.handshake?.query?.name;
+  if (mode && name) {
+    return `/${mode}/${name}`;
+  }
+  return socket.handshake?.url || "/";
+}
+
 function killProcessTree(pid) {
   if (!pid || pid <= 1 || pid === process.pid) return;
 
@@ -127,9 +161,11 @@ function killProcessTree(pid) {
 class Session {
   static lastResizeErrorLogTime = 0;
 
-  constructor(name, mode) {
+  constructor(name, mode, creator = {}) {
     this.name = name;
     this.mode = mode === "s" ? "s" : "a";
+    this.creatorIp = creator.ip || "unknown";
+    this.creatorUrl = creator.url || "unknown";
     this.command = this.mode === "s" ? SHELL_CMD : AGY_BIN;
     this.args = this.mode === "s" ? SHELL_ARGS : AGY_ARGS;
     this.createdAt = new Date();
@@ -157,6 +193,10 @@ class Session {
         cwd: WORK_DIR,
         env: ENV,
       });
+
+      console.log(
+        `New PTY created: IP ${this.creatorIp} accessed URL ${this.creatorUrl} to create session [${this.name}]`
+      );
 
       this.ptyProcess.on("data", (data) => {
         this.appendBuffer(data);
@@ -294,14 +334,14 @@ function generateSessionName() {
   return name;
 }
 
-function getOrCreateSession(name, mode) {
+function getOrCreateSession(name, mode, creator = {}) {
   if (cleanedSessions.has(name)) {
     return null;
   }
   if (sessions.has(name)) {
     return sessions.get(name);
   }
-  const session = new Session(name, mode);
+  const session = new Session(name, mode, creator);
   sessions.set(name, session);
   return session;
 }
@@ -376,7 +416,7 @@ handler.get(["/", "/a", "/a/", "/s", "/s/"], (req, res) => {
   res.redirect(`/${mode}/${generateSessionName()}`);
 });
 
-// 1. /a/<name> & 2. /s/<name> -> create/connect session
+// 1. /a/<name> & 2. /s/<name> -> serve terminal page
 handler.get(["/a/:name", "/s/:name"], (req, res) => {
   const mode = req.path.startsWith("/s") ? "s" : "a";
   const name = String(req.params.name || "").trim();
@@ -386,7 +426,6 @@ handler.get(["/a/:name", "/s/:name"], (req, res) => {
   if (cleanedSessions.has(name)) {
     return res.status(410).type("text/plain").send(`Session "${name}" has been cleaned up\n`);
   }
-  getOrCreateSession(name, mode);
   res.sendFile(path.join(ROOT_DIR, "client/index.html"));
 });
 
@@ -423,7 +462,9 @@ ws.use((socket, next) => {
 });
 
 ws.on("connection", (socket) => {
-  const session = getOrCreateSession(socket.handshake.query.name, socket.handshake.query.mode);
+  const ip = extractSocketIp(socket);
+  const url = extractSocketUrl(socket);
+  const session = getOrCreateSession(socket.handshake.query.name, socket.handshake.query.mode, { ip, url });
   if (!session || !session.ptyProcess) {
     return;
   }
