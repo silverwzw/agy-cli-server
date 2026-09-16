@@ -27,13 +27,7 @@ function createUploadRouter({ ROOT_DIR, WORK_DIR }) {
       targetPath = path.join(targetPath, defaultFilename);
     }
 
-    const overwriteQuery = req.query.override || req.query.overwrite || req.query.allow_override;
-    const overwriteHeader = req.headers["x-override"] || req.headers["x-overwrite"] || req.headers["x-allow-override"];
-    const allowOverwrite =
-      overwriteQuery === "true" ||
-      overwriteQuery === "1" ||
-      overwriteHeader === "true" ||
-      overwriteHeader === "1";
+    const allowOverwrite = Boolean(req.query && Object.hasOwn(req.query, "overwrite"));
 
     // Return 409 Conflict if target file already exists and overwrite is not permitted
     if (!allowOverwrite && fs.existsSync(targetPath)) {

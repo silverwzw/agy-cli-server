@@ -395,15 +395,11 @@ fileList.addEventListener("keydown", (e) => {
 function uploadSingleFile(file, target, onProgress, overwrite = false) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    const url = `/control/upload?path=${encodeURIComponent(target)}${overwrite ? "&override=true&overwrite=true" : ""}`;
+    const url = `/control/upload?path=${encodeURIComponent(target)}${overwrite ? "&overwrite" : ""}`;
     xhr.open("PUT", url);
     xhr.setRequestHeader("X-File-Path", encodeURI(target));
     const targetFilename = target.split("/").filter(Boolean).pop() || file.name;
     xhr.setRequestHeader("X-File-Name", encodeURI(targetFilename));
-    if (overwrite) {
-      xhr.setRequestHeader("X-Override", "true");
-      xhr.setRequestHeader("X-Overwrite", "true");
-    }
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
