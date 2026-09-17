@@ -81,75 +81,85 @@ window.addEventListener('resize', () => {
 //                 Socket Setup
 // ===============================================
 
-const socket = io({
-  query: {
-    mode: sessionMode,
-    name: sessionName,
-  },
-});
 
-//
-// == Connection Management ==
-//
+if (document.prerendering) {
+  document.addEventListener("prerenderingchange", initSocket, { once: true });
+} else {
+  initSocket();
+}
 
-socket.on("connect", () => {
-  console.log(`socket.io: connected via ${socket.io.engine.transport.name} mode`); 
-});
-
-socket.on("connect_error", (err) => {
-  console.error("Socket.IO connect error:", err);
-  showError(err);
-});
-
-socket.on("error", (err) => {
-  console.error("Socket.IO error:", err);
-  showError(err);
-});
-
-socket.io.engine.on("upgrade", (transport) => {
-  console.log(`socket.io: transport upgraded to ${transport.name} mode`);
-});
-
-socket.io.engine.on("upgradeError", (err) => {
-  console.error("Socket.IO upgrade error:", err);
-});
-
-//
-// == Socket <-> xTerm ==
-//
-
-socket.on("t.s2c", (data) => {
-  term.write(data);
-});
-
-const onDataHandler = term.onData((data) => {
-  socket.emit("t.c2s", data);
-});
-
-const onResizeHandler = term.onResize((size) => {
-  socket.emit("t.resize", size);
-});
+function initSocket() {
+  const socket = io({
+    query: {
+      mode: sessionMode,
+      name: sessionName,
+    },
+  });
 
 
-//
-// == Session Management ==
-//
+  //
+  // == Connection Management ==
+  //
 
-let isAborted = false;
+  socket.on("connect", () => {
+    console.log(`socket.io: connected via ${socket.io.engine.transport.name} mode`); 
+  });
 
-socket.on("s.joinSuccess", () => {
-  addon_fit.fit();
-  if (!isAborted) {
-    socket.emit("t.resize", { cols: term.cols, rows: term.rows });
-  }
-});
+  socket.on("connect_error", (err) => {
+    console.error("Socket.IO connect error:", err);
+    showError(err);
+  });
 
-socket.on("s.aborted", () => {
-  isAborted = true;
-  term.options.disableStdin = true;
-  onDataHandler.dispose();
-  onResizeHandler.dispose();
-});
+  socket.on("error", (err) => {
+    console.error("Socket.IO error:", err);
+    showError(err);
+  });
+
+  socket.io.engine.on("upgrade", (transport) => {
+    console.log(`socket.io: transport upgraded to ${transport.name} mode`);
+  });
+
+  socket.io.engine.on("upgradeError", (err) => {
+    console.error("Socket.IO upgrade error:", err);
+  });
+
+  //
+  // == Socket <-> xTerm ==
+  //
+
+  socket.on("t.s2c", (data) => {
+    term.write(data);
+  });
+
+  const onDataHandler = term.onData((data) => {
+    socket.emit("t.c2s", data);
+  });
+
+  const onResizeHandler = term.onResize((size) => {
+    socket.emit("t.resize", size);
+  });
+
+
+  //
+  // == Session Management ==
+  //
+
+  let isAborted = false;
+
+  socket.on("s.joinSuccess", () => {
+    addon_fit.fit();
+    if (!isAborted) {
+      socket.emit("t.resize", { cols: term.cols, rows: term.rows });
+    }
+  });
+
+  socket.on("s.aborted", () => {
+    isAborted = true;
+    term.options.disableStdin = true;
+    onDataHandler.dispose();
+    onResizeHandler.dispose();
+  });
+}
 
 // =======================================================
 //                  Progress Addon UI Handling

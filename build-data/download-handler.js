@@ -160,26 +160,30 @@ function handleFileDownload(req, res, targetFile, displayPath, ROOT_DIR) {
 function createDownloadRouter({ ROOT_DIR, WORK_DIR }) {
   const router = express.Router();
 
+  function handler(req, res, pathIsRel) {
+    const purpose = (req.headers?.["sec-purpose"] || req.headers?.["x-purpose"] || req.headers?.["x-moz"] || "").toLowerCase();
+    if (purpose.includes("prefetch") || purpose.includes("prerender")) {
+		return res.status(400).type("text/plain").send("Prefetch / prerender request not supported for download url.");
+	}
+    let inputPath = Array.isArray(req.params.path) ? req.params.path.join("/") : (req.params.path || "");
+    inputPath = decodeURIComponent(inputPath).trim();
+    if (!inputPath) {
+      return res.status(400).type("text/plain")
+	            .send(`Missing path. Usage: /control/download/${pathIsRel ? "rel" : "abs"}/<path>\n`);
+    }
+    const targetFile = path.resolve(pathIsRel ? WORK_DIR : "/", inputPath);
+	const displayPath = pathIsRel ? inputPath : "/" + inputPath.replace(/^\/+/, "");
+    handleFileDownload(req, res, targetFile, displayPath, ROOT_DIR);
+  }
+
   // Relative path: GET /control/download/rel/<relative_path>
   router.get(["/control/download/rel/{*path}"], (req, res) => {
-    let relPath = Array.isArray(req.params.path) ? req.params.path.join("/") : (req.params.path || "");
-    relPath = decodeURIComponent(relPath).trim();
-    if (!relPath) {
-      return res.status(400).type("text/plain").send("Missing relative path. Usage: /control/download/rel/<relative_path>\n");
-    }
-    const targetFile = path.resolve(WORK_DIR, relPath);
-    handleFileDownload(req, res, targetFile, relPath, ROOT_DIR);
+	handler(req, res, true);
   });
 
   // Absolute path: GET /control/download/abs/<absolute_path>
   router.get(["/control/download/abs/{*path}"], (req, res) => {
-    let absPath = Array.isArray(req.params.path) ? req.params.path.join("/") : (req.params.path || "");
-    absPath = decodeURIComponent(absPath).trim();
-    if (!absPath) {
-      return res.status(400).type("text/plain").send("Missing absolute path. Usage: /control/download/abs/<absolute_path>\n");
-    }
-    const targetFile = path.resolve("/", absPath);
-    handleFileDownload(req, res, targetFile, "/" + absPath.replace(/^\/+/, ""), ROOT_DIR);
+    handler(req, res, false);
   });
 
   // Fallback for missing path or invalid format
