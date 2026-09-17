@@ -102,10 +102,6 @@ const ws = socket(server, {
 const sessions = new Map();
 const cleanedSessions = new Set();
 
-
-
-
-
 function extractSocketIp(socket) {
   let ip =
     socket.handshake?.headers?.["x-real-ip"] ||
@@ -349,6 +345,37 @@ function getOrCreateSession(name, mode, creator = {}) {
 // =======================================================
 //                     HTTP Routes
 // =======================================================
+
+// Log incoming HTTP requests
+handler.use((req, res, next) => {
+  try {
+    const time = new Date().toISOString();
+    const requestUrl = req.originalUrl || req.url;
+    const userIp = extractRequestIp(req);
+    const headers = { ...req.headers };
+    delete headers.cookie;
+    console.log(`[${time}] HTTP ${req.method} ${requestUrl} from IP ${userIp} | Headers:`, headers);
+  } catch (err) {
+    console.error("Error logging HTTP request:", err);
+  }
+  next();
+
+  function extractRequestIp(r) {
+    let ip =
+      r.headers?.["x-real-ip"] ||
+      r.headers?.["x-forwarded-for"] ||
+      r.ip ||
+      r.socket?.remoteAddress ||
+      "unknown";
+    if (typeof ip === "string") {
+      ip = ip.split(",")[0].trim();
+      if (ip.startsWith("::ffff:")) {
+        ip = ip.substring(7);
+      }
+    }
+    return ip;
+  }
+});
 
 // Static routes
 for (const request_path in ROUTING_TABLE) {
