@@ -27,6 +27,8 @@ const SHELL_ARGS = [];
 const AGY_BIN = "/root/.local/bin/agy";
 const AGY_ARGS = ["--dangerously-skip-permissions"];
 
+const MAX_ALIGNMENT_SEARCH_WINDOW = 4096;
+
 const ENV = {
   ...process.env,
   PATH: `/root/.gemini/antigravity-cli/bin:/root/.local/bin:${process.env.PATH || ""}`,
@@ -36,50 +38,17 @@ const ENV = {
 };
 
 const ROUTING_TABLE = {
-  "/static/main.js": {
-    path: "client/main.js",
-    cache: false,
-  },
-  "/static/upload.js": {
-    path: "client/upload.js",
-    cache: false,
-  },
-  "/static/download.js": {
-    path: "client/download.js",
-    cache: false,
-  },
-  "/static/xterm.js": {
-    path: "node_modules/@xterm/xterm/lib/xterm.js",
-    cache: true,
-  },
-  "/static/xterm-clipboard.js": {
-    path: "node_modules/@xterm/addon-clipboard/lib/addon-clipboard.js",
-    cache: true,
-  },
-  "/static/xterm-fit.js": {
-    path: "node_modules/@xterm/addon-fit/lib/addon-fit.js",
-    cache: true,
-  },
-  "/static/xterm-weblinks.js": {
-    path: "node_modules/@xterm/addon-web-links/lib/addon-web-links.js",
-    cache: true,
-  },
-  "/static/xterm-image.js": {
-    path: "node_modules/@xterm/addon-image/lib/addon-image.js",
-    cache: true,
-  },
-  "/static/xterm-progress.js": {
-    path: "node_modules/@xterm/addon-progress/lib/addon-progress.js",
-    cache: true,
-  },
-  "/static/xterm-search.js": {
-    path: "node_modules/@xterm/addon-search/lib/addon-search.js",
-    cache: true,
-  },
-  "/static/xterm.css": {
-    path: "node_modules/@xterm/xterm/css/xterm.css",
-    cache: true,
-  },
+  "/static/main.js": "client/main.js",
+  "/static/upload.js": "client/upload.js",
+  "/static/download.js": "client/download.js",
+  "/static/xterm.js": "node_modules/@xterm/xterm/lib/xterm.js",
+  "/static/xterm-clipboard.js": "node_modules/@xterm/addon-clipboard/lib/addon-clipboard.js",
+  "/static/xterm-fit.js": "node_modules/@xterm/addon-fit/lib/addon-fit.js",
+  "/static/xterm-weblinks.js": "node_modules/@xterm/addon-web-links/lib/addon-web-links.js",
+  "/static/xterm-image.js": "node_modules/@xterm/addon-image/lib/addon-image.js",
+  "/static/xterm-progress.js": "node_modules/@xterm/addon-progress/lib/addon-progress.js",
+  "/static/xterm-search.js": "node_modules/@xterm/addon-search/lib/addon-search.js",
+  "/static/xterm.css": "node_modules/@xterm/xterm/css/xterm.css",
 };
 
 // =======================================================
@@ -107,7 +76,6 @@ function extractSocketIp(socket) {
     socket.handshake?.headers?.["x-real-ip"] ||
     socket.handshake?.headers?.["x-forwarded-for"] ||
     socket.handshake?.address ||
-    socket.conn?.remoteAddress ||
     "unknown";
   if (typeof ip === "string") {
     ip = ip.split(",")[0].trim();
@@ -128,12 +96,7 @@ function extractSocketUrl(socket) {
       return referer;
     }
   }
-  const mode = socket.handshake?.query?.mode;
-  const name = socket.handshake?.query?.name;
-  if (mode && name) {
-    return `/${mode}/${name}`;
-  }
-  return socket.handshake?.url || "/";
+  return socket.handshake?.url || undefined;
 }
 
 function killProcessTree(pid) {
@@ -154,7 +117,61 @@ function killProcessTree(pid) {
   }, 1000).unref();
 }
 
+function findBufferCutIndex(buffer, maxLength) {
+  const rawCutIndex = buffer.length - maxLength;
+
+  // 1. Try to align cutIndex to the start of a line to avoid partial lines
+  const nextNewline = buffer.indexOf("\n", rawCutIndex);
+  if (nextNewline !== -1 && nextNewline < rawCutIndex + MAX_ALIGNMENT_SEARCH_WINDOW) {
+    return nextNewline + 1;
+  }
+
+  // Fallback: window did not contain a newline, proceed with rawCutIndex and guard against splits
+  let cutIndex = rawCutIndex;
+
+  // 2. Ensure we do not split a UTF-16 surrogate pair
+  if (cutIndex > 0 && cutIndex < buffer.length) {
+    const prevCode = buffer.charCodeAt(cutIndex - 1);
+    const currCode = buffer.charCodeAt(cutIndex);
+    if (prevCode >= 0xd800 && prevCode <= 0xdbff && currCode >= 0xdc00 && currCode <= 0xdfff) {
+      cutIndex++;
+    }
+  }
+
+  // 3. Ensure we do not cut inside an ANSI escape sequence
+  const checkStart = Math.max(0, cutIndex - 256);
+  const lastEsc = buffer.lastIndexOf("\x1b", cutIndex - 1);
+  if (lastEsc >= checkStart) {
+    const escSlice = buffer.slice(lastEsc, cutIndex);
+    let isClosed = false;
+    if (escSlice.length === 1) {
+      isClosed = false;
+    } else if (escSlice[1] === "[") {
+      isClosed = /[\x40-\x7E]/.test(escSlice.slice(2));
+    } else if (escSlice[1] === "]") {
+      isClosed = /\x07|\x1b\\/.test(escSlice.slice(2));
+    } else {
+      isClosed = escSlice.length >= 3;
+    }
+
+    if (!isClosed) {
+      cutIndex = lastEsc;
+    }
+  }
+
+  // Safety fallback: ensure cutIndex advances so buffer does not grow indefinitely
+  if (cutIndex <= 0) {
+    cutIndex = rawCutIndex;
+  }
+
+  return cutIndex;
+}
+
 class Session {
+  static STILL_ACTIVE = 0;
+  static ABORTED_BY_CLIENT = 1;
+  static ABORTED_BY_SERVER = 2;
+
   static lastResizeErrorLogTime = 0;
 
   constructor(name, mode, creator = {}) {
@@ -169,7 +186,7 @@ class Session {
     this.buffer = "";
     this.maxBufferLength = 256 * 1024;
     this.ptyProcess = null;
-    this.aborted = false;
+    this.aborted = Session.STILL_ACTIVE;
     this.cleanedUp = false;
     this.exitCode = null;
 
@@ -210,9 +227,10 @@ class Session {
       this.ptyProcess.on("exit", (code, signal) => {
         console.log(`Session [${this.name}] exited (code: ${code}, signal: ${signal})`);
         this.exitCode = code;
-        if (this.aborted || this.cleanedUp) {
+        if (this.aborted !== Session.STILL_ACTIVE || this.cleanedUp) {
           return;
         }
+        this.aborted = Session.ABORTED_BY_CLIENT;
         this.cleanup("\r\n\x1b[31m[Session exited]\x1b[0m\r\n");
       });
     } catch (err) {
@@ -223,49 +241,7 @@ class Session {
   appendBuffer(data) {
     this.buffer += data;
     if (this.buffer.length > this.maxBufferLength) {
-      let cutIndex = this.buffer.length - this.maxBufferLength;
-
-      // 1. Try to align cutIndex to the start of a line to avoid partial lines
-      const nextNewline = this.buffer.indexOf("\n", cutIndex);
-      if (nextNewline !== -1 && nextNewline < cutIndex + 4096) {
-        cutIndex = nextNewline + 1;
-      }
-
-      // 2. Ensure we do not split a UTF-16 surrogate pair
-      if (cutIndex > 0 && cutIndex < this.buffer.length) {
-        const prevCode = this.buffer.charCodeAt(cutIndex - 1);
-        const currCode = this.buffer.charCodeAt(cutIndex);
-        if (prevCode >= 0xd800 && prevCode <= 0xdbff && currCode >= 0xdc00 && currCode <= 0xdfff) {
-          cutIndex++;
-        }
-      }
-
-      // 3. Ensure we do not cut inside an ANSI escape sequence
-      const checkStart = Math.max(0, cutIndex - 256);
-      const lastEsc = this.buffer.lastIndexOf("\x1b", cutIndex - 1);
-      if (lastEsc >= checkStart) {
-        const escSlice = this.buffer.slice(lastEsc, cutIndex);
-        let isClosed = false;
-        if (escSlice.length === 1) {
-          isClosed = false;
-        } else if (escSlice[1] === "[") {
-          isClosed = /[\x40-\x7E]/.test(escSlice.slice(2));
-        } else if (escSlice[1] === "]") {
-          isClosed = /\x07|\x1b\\/.test(escSlice.slice(2));
-        } else {
-          isClosed = escSlice.length >= 3;
-        }
-
-        if (!isClosed) {
-          cutIndex = lastEsc;
-        }
-      }
-
-      // Safety fallback: ensure cutIndex advances so buffer does not grow indefinitely
-      if (cutIndex <= 0) {
-        cutIndex = this.buffer.length - this.maxBufferLength;
-      }
-
+      const cutIndex = findBufferCutIndex(this.buffer, this.maxBufferLength);
       this.buffer = this.buffer.slice(cutIndex);
     }
   }
@@ -310,15 +286,34 @@ class Session {
       this.appendBuffer(msg);
       ws.to(`session:${this.name}`).emit("t.s2c", msg);
     }
+    ws.to(`session:${this.name}`).emit("s.aborted", { name: this.name, reason: this.aborted });
     sessions.delete(this.name);
     cleanedSessions.add(this.name);
+
+    let abortLabel;
+    switch (this.aborted) {
+      case Session.ABORTED_BY_CLIENT:
+        abortLabel = "ABORTED_BY_CLIENT";
+        break;
+      case Session.ABORTED_BY_SERVER:
+        abortLabel = "ABORTED_BY_SERVER";
+        break;
+      case Session.STILL_ACTIVE:
+        abortLabel = "STILL_ACTIVE";
+        break;
+      default:
+        abortLabel = "UNKNOWN";
+        break;
+    }
+    console.log(
+      `Session [${this.name}] cleaned up (mode: ${this.mode}, aborted: ${this.aborted} [${abortLabel}], exitCode: ${this.exitCode})`
+    );
   }
 
-  abort() {
+  abort(reason) {
     if (this.cleanedUp) return;
-    this.aborted = true;
+    this.aborted = reason;
     this.cleanup("\r\n\x1b[31m[Session aborted]\x1b[0m\r\n");
-    ws.to(`session:${this.name}`).emit("s.aborted", { name: this.name });
   }
 }
 
@@ -378,18 +373,9 @@ handler.use((req, res, next) => {
 });
 
 // Static routes
-for (const request_path in ROUTING_TABLE) {
-  const { path: resource_path, cache } = ROUTING_TABLE[request_path];
+for (const [request_path, resource_path] of Object.entries(ROUTING_TABLE)) {
   handler.get(request_path, (req, res) => {
-    const resolvedPath = path.join(ROOT_DIR, resource_path);
-    if (!cache) {
-      res.sendFile(resolvedPath);
-    } else {
-      res.sendFile(resolvedPath, {
-        maxAge: 10 * 3600 * 1000,
-        immutable: false,
-      });
-    }
+    res.sendFile(path.join(ROOT_DIR, resource_path));
   });
 }
 
@@ -426,7 +412,7 @@ handler.all(["/control/abort/:name", "/control/abort/:name/"], (req, res) => {
     return res.status(404).type("text/plain").send(`Session "${name}" not found\n`);
   }
 
-  session.abort();
+  session.abort(Session.ABORTED_BY_SERVER);
 
   res.status(200).type("json").send(JSON.stringify({ ok: true, name }, null, 2) + "\n");
 });

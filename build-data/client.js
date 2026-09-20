@@ -158,6 +158,7 @@ function initSocket() {
     term.options.disableStdin = true;
     onDataHandler.dispose();
     onResizeHandler.dispose();
+    socket.disconnect();
   });
 }
 
