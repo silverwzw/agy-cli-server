@@ -489,7 +489,7 @@ ws.on("connection", (socket) => {
   socket.emit("s.joinSuccess", { name: session.name, mode: session.mode });
 
   if (session.buffer.length > 0) {
-    socket.emit("t.s2c", session.buffer);
+    socket.emit("t.replay", session.buffer);
   }
 
   socket.on("t.c2s", (data) => {

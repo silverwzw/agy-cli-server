@@ -127,6 +127,11 @@ function initSocket() {
   // == Socket <-> xTerm ==
   //
 
+  socket.on("t.replay", (data) => {
+    term.reset();
+    term.write(data);
+  });
+
   socket.on("t.s2c", (data) => {
     term.write(data);
   });

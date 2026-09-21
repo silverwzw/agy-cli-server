@@ -170,7 +170,11 @@ function createDownloadRouter({ ROOT_DIR, WORK_DIR }) {
 		return res.status(400).type("text/plain").send("Prefetch / prerender request not supported for download url.");
 	}
     let inputPath = Array.isArray(req.params.path) ? req.params.path.join("/") : (req.params.path || "");
-    inputPath = decodeURIComponent(inputPath).trim();
+    try {
+      inputPath = decodeURIComponent(inputPath).trim();
+    } catch (_) {
+      return res.status(400).type("text/plain").send("Malformed URL encoding in path\n");
+    }
     if (!inputPath) {
       return res.status(400).type("text/plain")
 	            .send(`Missing path. Usage: /control/download/${pathIsRel ? "rel" : "abs"}/<path>\n`);
