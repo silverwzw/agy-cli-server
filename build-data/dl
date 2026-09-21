@@ -1,0 +1,24 @@
+#!/bin/sh
+# dl - Helper script to generate clickable download links in the web terminal
+
+if [ $# -eq 0 ]; then
+  echo "Usage: dl <file_or_directory> [file2 ...]" >&2
+  exit 1
+fi
+
+for TARGET in "$@"; do
+  if [ ! -e "$TARGET" ] && [ ! -L "$TARGET" ]; then
+    echo "dl: cannot access '$TARGET': No such file or directory" >&2
+    continue
+  fi
+
+  RESOLVED=$(realpath "$TARGET" 2>/dev/null || readlink -f "$TARGET" 2>/dev/null || echo "$TARGET")
+  URL="/control/download/abs${RESOLVED}"
+
+  if [ -d "$RESOLVED" ]; then
+    echo "Directory: $RESOLVED (download as .tar.gz)"
+  else
+    echo "File: $RESOLVED"
+  fi
+  printf "  Download link: \033]8;;%s\007%s\033]8;;\007\n\n" "$URL" "$URL"
+done
