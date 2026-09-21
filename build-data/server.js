@@ -345,7 +345,7 @@ function getOrCreateSession(name, mode, creator = {}) {
 handler.use((req, res, next) => {
   try {
     const time = new Date().toISOString();
-    const requestUrl = req.originalUrl || req.url;
+    const requestUrl = req.originalUrl;
     const userIp = extractRequestIp(req);
     const headers = { ...req.headers };
     delete headers.cookie;

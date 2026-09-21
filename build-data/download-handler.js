@@ -4,6 +4,8 @@ const path = require("path");
 const { spawn } = require("child_process");
 const posix = require("posix");
 
+const CLI_UA_KEYWORDS = ["curl", "wget", "aria", "axel", "httpie", "fetch/"];
+
 function getUserAndGroup(uid, gid) {
   let userName = String(uid);
   let groupName = String(gid);
@@ -142,12 +144,12 @@ function handleFileDownload(req, res, targetFile, displayPath, template) {
 
   const isHtmlClient = req.headers["accept"]?.includes("text/html");
   const ua = (req.headers["user-agent"] || "").toLowerCase();
-  const isCli = ua.includes("curl") || ua.includes("wget");
+  const isCli = CLI_UA_KEYWORDS.some((kw) => ua.includes(kw));
   const isRaw = req.query.raw !== undefined;
   const wantsHtml = isHtmlClient && !isCli && !isRaw;
 
   if (wantsHtml) {
-    return res.type("html").send(getDownloadHtml(targetFile, stat, req.originalUrl || req.url, template));
+    return res.type("html").send(getDownloadHtml(targetFile, stat, req.originalUrl, template));
   }
 
   if (stat.isDirectory()) {
@@ -168,7 +170,10 @@ function createDownloadRouter({ ROOT_DIR, WORK_DIR }) {
   const templatePath = path.join(ROOT_DIR, "client/download.html");
   const template = fs.readFileSync(templatePath, "utf-8");
 
-  function handler(req, res, pathIsRel) {
+  // Note: This handler is registered via `handler.bind(undefined, pathIsRel)`.
+  // Be cautious when adding parameters: Express distinguishes error-handling middleware
+  // by checking `fn.length === 4`. Ensure the resulting bound function's arity does not become 4.
+  function handler(pathIsRel, req, res) {
     const purpose = (req.headers?.["sec-purpose"] || req.headers?.["x-purpose"] || req.headers?.["x-moz"] || "").toLowerCase();
     if (purpose.includes("prefetch") || purpose.includes("prerender")) {
 		return res.status(400).type("text/plain").send("Prefetch / prerender request not supported for download url.");
@@ -185,14 +190,10 @@ function createDownloadRouter({ ROOT_DIR, WORK_DIR }) {
   }
 
   // Relative path: GET /control/download/rel/<relative_path>
-  router.get(["/control/download/rel/{*path}"], (req, res) => {
-	handler(req, res, true);
-  });
+  router.get(["/control/download/rel/{*path}"], handler.bind(undefined, true));
 
   // Absolute path: GET /control/download/abs/<absolute_path>
-  router.get(["/control/download/abs/{*path}"], (req, res) => {
-    handler(req, res, false);
-  });
+  router.get(["/control/download/abs/{*path}"], handler.bind(undefined, false));
 
   // Fallback for missing path or invalid format
   router.all(["/control/download", "/control/download/{*path}"], (req, res) => {
@@ -207,9 +208,4 @@ function createDownloadRouter({ ROOT_DIR, WORK_DIR }) {
 
 module.exports = {
   createDownloadRouter,
-  handleFileDownload,
-  streamDirectoryArchive,
-  getDownloadHtml,
-  getUserAndGroup,
-  escapeHtml,
 };
