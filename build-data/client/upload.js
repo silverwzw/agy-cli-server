@@ -25,15 +25,7 @@ function formatBytes(bytes) {
   return (bytes / Math.pow(k, i)).toFixed(2) + " " + sizes[i];
 }
 
-function escapeHtml(str) {
-  if (!str) return "";
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
+const escapeHtml = require("escape-html");
 
 function computeTargetPath(file, customName) {
   let dest = destPathInput.value.trim().replace(/\\/g, "/") || "/agy";

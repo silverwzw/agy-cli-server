@@ -1,11 +1,14 @@
 FROM node:slim AS builder
 
-WORKDIR /build
-COPY ["./build-data/client.js", "./build-data/download.js", "./build-data/upload.js", "./"]
+COPY ["./build-data/client/*.js", "/build/"]
+COPY ["./build-data/builder/*", "/build/"]
 
-RUN npx --yes esbuild download.js --minify --allow-overwrite --outfile=download.js && \
-    npx --yes esbuild upload.js   --minify --allow-overwrite --outfile=upload.js && \
-    npx --yes esbuild client.js   --minify --outfile=main.js
+WORKDIR /build
+
+RUN npm install && \
+    npx --yes esbuild upload.js   --minify --allow-overwrite --bundle --outfile=upload.js && \
+    npx --yes esbuild download.js --minify --allow-overwrite --outfile=download.js && \
+    npx --yes esbuild main.js     --minify --allow-overwrite --outfile=main.js
 
 FROM debian:stable-slim AS final
 
@@ -33,24 +36,13 @@ RUN chmod u+x /init && \
 
 WORKDIR /webterm
 
-RUN npm i \
-      @xterm/xterm \
-      @xterm/addon-fit \
-      @xterm/addon-clipboard \
-      @xterm/addon-web-links \
-      @xterm/addon-image \
-      @xterm/addon-progress \
-      @xterm/addon-search \
-      node-pty \
-      express \
-      socket.io \
-      posix
+COPY ["./build-data/package.json" "./build-data/package-lock.json", "/webterm/"]
 
-RUN jq '.scripts = { start: "node server/server.js" }' package.json | sponge package.json
+RUN npm install
 
-COPY --from=builder ["/build/main.js", "/build/download.js", "/build/upload.js", "/webterm/client/"]
-COPY ["./build-data/index.html", "./build-data/upload.html", "./build-data/download.html",  "/webterm/client/"]
-COPY ["./build-data/upload-handler.js", "./build-data/download-handler.js", "./build-data/server.js", "/webterm/server/"]
+COPY --from=builder ["/build/*.js", "/webterm/client/"]
+COPY ["./build-data/client/*.html",  "/webterm/client/"]
+COPY ["./build-data/server", "/webterm/server/"]
 
 # 8443 for terminal webaccess
 # 8080 to access any application developed by agy

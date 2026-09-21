@@ -7,8 +7,8 @@ const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const { exec } = require("child_process");
-const { createUploadRouter } = require("./upload-handler");
-const { createDownloadRouter } = require("./download-handler");
+const { createUploadRouter } = require("./upload");
+const { createDownloadRouter } = require("./download");
 
 // TODO: voice input
 // TODO: overlay
