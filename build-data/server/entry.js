@@ -9,7 +9,7 @@ const os = require("os");
 const { exec } = require("child_process");
 const { createUploadRouter } = require("./upload");
 const { createDownloadRouter } = require("./download");
-const { isPrefetchOrPrerender } = require("./util");
+const { isPrefetchOrPrerender, noCache } = require("./util");
 
 // TODO: voice input
 // TODO: overlay
@@ -376,13 +376,17 @@ handler.use((req, res, next) => {
 // Static routes
 for (const [request_path, resource_path] of Object.entries(ROUTING_TABLE)) {
   const filePath = path.join(ROOT_DIR, resource_path);
+  let options = {};
+  if (resource_path.startsWith("node_modules/")) {
+    options = { maxAge: "1h" };
+  }
   handler.get(request_path, (req, res) => {
-    res.sendFile(filePath);
+    res.sendFile(filePath, options);
   });
 }
 
 // 8. List all sessions
-handler.get(["/control/list", "/control/list/"], (req, res) => {
+handler.get(["/control/list", "/control/list/"], noCache, (req, res) => {
   const sessionList = [];
   for (const [name, session] of sessions.entries()) {
     sessionList.push({

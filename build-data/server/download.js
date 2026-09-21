@@ -4,7 +4,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 const posix = require("posix");
 const escapeHtml = require("escape-html");
-const { isPrefetchOrPrerender } = require("./util");
+const { isPrefetchOrPrerender, noCache } = require("./util");
 
 const CLI_UA_KEYWORDS = ["curl", "wget", "aria", "axel", "httpie", "fetch/"];
 
@@ -155,7 +155,16 @@ function handleFileDownload(req, res, targetFile, displayPath, template) {
   }
 
   const filename = path.basename(targetFile);
-  res.download(targetFile, filename, { dotfiles: "allow" }, (err) => {
+  res.download(
+    targetFile,
+    filename,
+    {
+      dotfiles: "allow",
+      etag: false,
+      lastModified: false,
+      cacheControl: false,
+    },
+    (err) => {
     if (err && !res.headersSent) {
       console.error(`Error downloading file [${targetFile}]:`, err);
       res.status(500).type("text/plain").send(`Error downloading file: ${err.message}\n`);
@@ -167,6 +176,8 @@ function createDownloadRouter({ ROOT_DIR, WORK_DIR }) {
   const router = express.Router();
   const templatePath = path.join(ROOT_DIR, "client/download.html");
   const template = fs.readFileSync(templatePath, "utf-8");
+
+  router.use(noCache);
 
   // Note: This handler is registered via `handler.bind(undefined, pathIsRel)`.
   // Be cautious when adding parameters: Express distinguishes error-handling middleware
