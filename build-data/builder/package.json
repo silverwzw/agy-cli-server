@@ -1,5 +1,8 @@
 {
   "dependencies": {
     "escape-html": "^1.0.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }

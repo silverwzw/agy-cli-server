@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 const posix = require("posix");
+const escapeHtml = require("escape-html");
 
 const CLI_UA_KEYWORDS = ["curl", "wget", "aria", "axel", "httpie", "fetch/"];
 
@@ -24,16 +25,6 @@ function formatBytes(bytes) {
   const sizes = ["B", "KB", "MB", "GB", "TB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return (bytes / Math.pow(k, i)).toFixed(2) + " " + sizes[i];
-}
-
-function escapeHtml(str) {
-  if (str == null) return "";
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
 }
 
 function getDownloadHtml(targetFile, stat, rawUrl, template) {
