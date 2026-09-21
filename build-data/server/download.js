@@ -133,6 +133,12 @@ function handleFileDownload(req, res, targetFile, displayPath, template) {
     return res.status(500).type("text/plain").send(`Error reading file status: ${err.message}\n`);
   }
 
+  // Only allow regular files and directories; reject special files (FIFOs, character/block devices, sockets)
+  // to avoid hanging, resource exhaustion, or infinite streaming.
+  if (!stat.isFile() && !stat.isDirectory()) {
+    return res.status(400).type("text/plain").send(`Unsupported file type: ${displayPath}\n`);
+  }
+
   const isHtmlClient = req.headers["accept"]?.includes("text/html");
   const ua = (req.headers["user-agent"] || "").toLowerCase();
   const isCli = CLI_UA_KEYWORDS.some((kw) => ua.includes(kw));
