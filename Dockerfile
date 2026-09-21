@@ -43,7 +43,8 @@ RUN npm i \
       @xterm/addon-search \
       node-pty \
       express \
-      socket.io
+      socket.io \
+      posix
 
 RUN jq '.scripts = { start: "node server/server.js" }' package.json | sponge package.json
 

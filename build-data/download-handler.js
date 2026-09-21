@@ -2,29 +2,16 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const posix = require("posix");
 
 function getUserAndGroup(uid, gid) {
   let userName = String(uid);
   let groupName = String(gid);
   try {
-    const passwd = fs.readFileSync("/etc/passwd", "utf-8");
-    for (const line of passwd.split("\n")) {
-      const parts = line.split(":");
-      if (parts.length >= 3 && parseInt(parts[2], 10) === uid) {
-        userName = parts[0];
-        break;
-      }
-    }
+    userName = posix.getpwnam(uid).name;
   } catch (e) {}
   try {
-    const group = fs.readFileSync("/etc/group", "utf-8");
-    for (const line of group.split("\n")) {
-      const parts = line.split(":");
-      if (parts.length >= 3 && parseInt(parts[2], 10) === gid) {
-        groupName = parts[0];
-        break;
-      }
-    }
+    groupName = posix.getgrnam(gid).name;
   } catch (e) {}
   return { userName, groupName, uid, gid };
 }

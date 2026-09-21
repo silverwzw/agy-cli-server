@@ -374,8 +374,9 @@ handler.use((req, res, next) => {
 
 // Static routes
 for (const [request_path, resource_path] of Object.entries(ROUTING_TABLE)) {
+  const filePath = path.join(ROOT_DIR, resource_path);
   handler.get(request_path, (req, res) => {
-    res.sendFile(path.join(ROOT_DIR, resource_path));
+    res.sendFile(filePath);
   });
 }
 
@@ -430,6 +431,7 @@ handler.get(["/", "/a", "/a/", "/s", "/s/"], (req, res) => {
 });
 
 // 1. /a/<name> & 2. /s/<name> -> serve terminal page
+const indexHtmlPath = path.join(ROOT_DIR, "client/index.html");
 handler.get(["/a/:name", "/s/:name"], (req, res) => {
   const mode = req.path.startsWith("/s") ? "s" : "a";
   const name = String(req.params.name || "").trim();
@@ -439,7 +441,7 @@ handler.get(["/a/:name", "/s/:name"], (req, res) => {
   if (cleanedSessions.has(name)) {
     return res.status(410).type("text/plain").send(`Session "${name}" has been cleaned up\n`);
   }
-  res.sendFile(path.join(ROOT_DIR, "client/index.html"));
+  res.sendFile(indexHtmlPath);
 });
 
 handler.use((req, res) => {

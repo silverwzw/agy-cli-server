@@ -4,10 +4,11 @@ const path = require("path");
 
 function createUploadRouter({ ROOT_DIR, WORK_DIR }) {
   const router = express.Router();
+  const uploadHtmlPath = path.join(ROOT_DIR, "client/upload.html");
 
   // File Upload: GET (Web UI)
   router.get(["/control/upload", "/control/upload/"], (req, res) => {
-    return res.sendFile(path.join(ROOT_DIR, "client/upload.html"), { dotfiles: "allow" });
+    return res.sendFile(uploadHtmlPath, { dotfiles: "allow" });
   });
 
   // File Upload: PUT (Upload handler)
