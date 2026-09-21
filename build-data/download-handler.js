@@ -34,7 +34,7 @@ function escapeHtml(str) {
     .replace(/'/g, "&#039;");
 }
 
-function getDownloadHtml(targetFile, stat, rawUrl, ROOT_DIR) {
+function getDownloadHtml(targetFile, stat, rawUrl, template) {
   const isDirectory = stat.isDirectory();
   const baseName = path.basename(targetFile) || "root";
   const filename = isDirectory ? `${baseName}.tar.gz` : baseName;
@@ -49,9 +49,6 @@ function getDownloadHtml(targetFile, stat, rawUrl, ROOT_DIR) {
 
   const cleanUrl = rawUrl.split("?")[0];
   const directDownloadUrl = `${cleanUrl}?raw`;
-
-  const templatePath = path.join(ROOT_DIR, "client/download.html");
-  let template = fs.readFileSync(templatePath, "utf-8");
 
   const displayTarget = isDirectory ? `${targetFile} (directory archive)` : targetFile;
   const formattedSize = isDirectory ? `${formatBytes(stat.size)} (directory entry)` : formatBytes(stat.size);
@@ -110,7 +107,7 @@ function streamDirectoryArchive(req, res, targetDir) {
   });
 }
 
-function handleFileDownload(req, res, targetFile, displayPath, ROOT_DIR) {
+function handleFileDownload(req, res, targetFile, displayPath, template) {
   let stat;
   try {
     stat = fs.statSync(targetFile);
@@ -128,7 +125,7 @@ function handleFileDownload(req, res, targetFile, displayPath, ROOT_DIR) {
   const wantsHtml = isHtmlClient && !isCli && !isRaw;
 
   if (wantsHtml) {
-    return res.type("html").send(getDownloadHtml(targetFile, stat, req.originalUrl || req.url, ROOT_DIR));
+    return res.type("html").send(getDownloadHtml(targetFile, stat, req.originalUrl || req.url, template));
   }
 
   if (stat.isDirectory()) {
@@ -146,6 +143,8 @@ function handleFileDownload(req, res, targetFile, displayPath, ROOT_DIR) {
 
 function createDownloadRouter({ ROOT_DIR, WORK_DIR }) {
   const router = express.Router();
+  const templatePath = path.join(ROOT_DIR, "client/download.html");
+  const template = fs.readFileSync(templatePath, "utf-8");
 
   function handler(req, res, pathIsRel) {
     const purpose = (req.headers?.["sec-purpose"] || req.headers?.["x-purpose"] || req.headers?.["x-moz"] || "").toLowerCase();
@@ -160,7 +159,7 @@ function createDownloadRouter({ ROOT_DIR, WORK_DIR }) {
     }
     const targetFile = path.resolve(pathIsRel ? WORK_DIR : "/", inputPath);
 	const displayPath = pathIsRel ? inputPath : "/" + inputPath.replace(/^\/+/, "");
-    handleFileDownload(req, res, targetFile, displayPath, ROOT_DIR);
+    handleFileDownload(req, res, targetFile, displayPath, template);
   }
 
   // Relative path: GET /control/download/rel/<relative_path>
