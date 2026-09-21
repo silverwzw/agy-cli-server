@@ -9,6 +9,7 @@ const os = require("os");
 const { exec } = require("child_process");
 const { createUploadRouter } = require("./upload");
 const { createDownloadRouter } = require("./download");
+const { isPrefetchOrPrerender } = require("./util");
 
 // TODO: voice input
 // TODO: overlay
@@ -400,8 +401,12 @@ handler.get(["/control/list", "/control/list/"], (req, res) => {
 
 // 9. Abort session: kill pty and its child processes
 handler.all(["/control/abort/:name", "/control/abort/:name/"], (req, res) => {
+  if (isPrefetchOrPrerender(req)) {
+    return res.status(400).type("text/plain").send("Prefetch / prerender request not supported for abort url\n");
+  }
+
   if (req.method !== "DELETE" && req.method !== "GET") {
-    return res.status(405).type("text/plain").send(`Unsupported method ${req.method}`);
+    return res.status(405).type("text/plain").send(`Unsupported method ${req.method}\n`);
   }
 
   const name = String(req.params.name || "").trim();

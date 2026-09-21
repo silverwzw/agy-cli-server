@@ -4,6 +4,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 const posix = require("posix");
 const escapeHtml = require("escape-html");
+const { isPrefetchOrPrerender } = require("./util");
 
 const CLI_UA_KEYWORDS = ["curl", "wget", "aria", "axel", "httpie", "fetch/"];
 
@@ -171,10 +172,9 @@ function createDownloadRouter({ ROOT_DIR, WORK_DIR }) {
   // Be cautious when adding parameters: Express distinguishes error-handling middleware
   // by checking `fn.length === 4`. Ensure the resulting bound function's arity does not become 4.
   function handler(pathIsRel, req, res) {
-    const purpose = (req.headers?.["sec-purpose"] || req.headers?.["x-purpose"] || req.headers?.["x-moz"] || "").toLowerCase();
-    if (purpose.includes("prefetch") || purpose.includes("prerender")) {
-		return res.status(400).type("text/plain").send("Prefetch / prerender request not supported for download url.");
-	}
+    if (isPrefetchOrPrerender(req)) {
+      return res.status(400).type("text/plain").send("Prefetch / prerender request not supported for download url.\n");
+    }
     let inputPath = Array.isArray(req.params.path) ? req.params.path.join("/") : (req.params.path || "");
     try {
       inputPath = decodeURIComponent(inputPath).trim();
