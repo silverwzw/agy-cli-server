@@ -1,3 +1,30 @@
+# Project Overview
+This project provides a containerized web terminal and workspace environment designed for running the Google Antigravity CLI (`agy`) and related workflows in the browser. It features a web terminal (powered by xterm.js in the browser and node-pty on the server), bidirectional file transfer capabilities (streaming downloads with dynamic tar.gz directory archiving, and atomic chunked uploads), and in-terminal CLI helper tools (such as `dl` for clickable terminal download links). The service is designed to be hosted behind an authenticating reverse proxy with full administrative privileges inside the container.
+
+# File Hierarchy
+- `Dockerfile`: Multi-stage Docker build recipe for bundling frontend assets and building the runtime container image.
+- `test.sh`: Script to build and run the development container locally with port mappings and volume mounts.
+- `build-data/`: Production application assets and source code packaged into the container:
+  - `init`: Container entrypoint script initializing ssh-agent and launching the Node.js server.
+  - `dl`: Terminal CLI helper script generating clickable ANSI OSC 8 download hyperlinks for files and directories.
+  - `settings.json`: Configuration template for the Antigravity CLI.
+  - `package.json`, `package-lock.json`: Production Node.js runtime dependencies (Express, Socket.IO, node-pty, tar-fs, etc.).
+  - `builder/`: Build-time configuration and dependencies (e.g., esbuild) used in the Docker build stage to bundle client assets.
+  - `client/`: Browser-side frontend assets:
+    - `index.html`, `main.js`: Main web terminal UI and Socket.IO client logic (xterm.js, resize handling, reconnect buffer replay).
+    - `download.html`, `download.js`: Web page and client logic for file and directory downloads.
+    - `upload.html`, `upload.js`: Web page and client logic for file uploads with drag-and-drop and progress tracking.
+  - `server/`: Server-side Node.js / Express application:
+    - `entry.js`: Application entry point managing HTTP routes, Socket.IO terminal sessions, and lifecycle endpoints.
+    - `download.js`: Download handler serving single files or streaming tar.gz directory archives.
+    - `upload.js`: Upload handler processing atomic file uploads with temp files, overwrite verification, and disconnect cleanup.
+    - `util.js`: Shared server utilities (such as browser prefetch/prerender detection).
+- `data/`: Local development mounts and secrets:
+  - `dev_init`: Initialization script used when running the development container.
+  - `secrets/`: Local directory holding sensitive credentials (e.g., `agy-token`), excluded from version control.
+- `util/`: Helper scripts used for development or maintenance (e.g., `progress_bar.js`).
+- `.agent_worklog/`: Historical record of agent and user interaction logs.
+
 # Agent Rules
 
 ## 1. Prohibition on `/webterm` Directory and Files
