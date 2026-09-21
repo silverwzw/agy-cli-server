@@ -36,7 +36,7 @@ function escapeHtml(str) {
 
 function getDownloadHtml(targetFile, stat, rawUrl, template) {
   const isDirectory = stat.isDirectory();
-  const baseName = path.basename(targetFile) || "root";
+  const baseName = path.basename(targetFile);
   const filename = isDirectory ? `${baseName}.tar.gz` : baseName;
   const safeName = /^[a-zA-Z0-9_\-\.]+$/.test(filename) ? filename : JSON.stringify(filename);
   const modeOctal = (stat.mode & 0o7777).toString(8);
@@ -73,11 +73,13 @@ function getDownloadHtml(targetFile, stat, rawUrl, template) {
 }
 
 function streamDirectoryArchive(req, res, targetDir) {
-  const baseName = path.basename(targetDir) || "root";
+  if (targetDir === "/") {
+    return res.status(400).type("text/plain").send("Downloading root directory is not supported\n");
+  }
+
+  const baseName = path.basename(targetDir);
   const archiveName = `${baseName}.tar.gz`;
   const parentDir = path.dirname(targetDir);
-  const cwd = targetDir === "/" ? "/" : parentDir;
-  const targetArg = targetDir === "/" ? "." : path.basename(targetDir);
 
   res.setHeader("Content-Type", "application/gzip");
   res.setHeader(
@@ -85,9 +87,9 @@ function streamDirectoryArchive(req, res, targetDir) {
     `attachment; filename="${encodeURIComponent(archiveName)}"; filename*=UTF-8''${encodeURIComponent(archiveName)}`
   );
 
-  const tarProcess = spawn("tar", ["-czf", "-", "-C", cwd, targetArg]);
+  const tarProcess = spawn("tar", ["-czf", "-", "-C", parentDir, baseName]);
 
-  tarProcess.stdout.pipe(res);
+  tarProcess.stdout.pipe(res, { end: false });
 
   tarProcess.stderr.on("data", (data) => {
     console.error(`tar error for ${targetDir}: ${data}`);
@@ -97,6 +99,22 @@ function streamDirectoryArchive(req, res, targetDir) {
     console.error(`Failed to spawn tar process for [${targetDir}]:`, err);
     if (!res.headersSent) {
       res.status(500).type("text/plain").send(`Error creating archive: ${err.message}\n`);
+    } else {
+      res.destroy(err);
+    }
+  });
+
+  tarProcess.on("close", (code, signal) => {
+    if (code === 0) {
+      res.end();
+      return;
+    }
+
+    console.error(`tar process exited with code ${code}, signal ${signal} for [${targetDir}]`);
+    if (!res.headersSent) {
+      res.status(500).type("text/plain").send("Error creating archive\n");
+    } else {
+      res.destroy(new Error(`tar process failed with code ${code}`));
     }
   });
 
@@ -108,6 +126,10 @@ function streamDirectoryArchive(req, res, targetDir) {
 }
 
 function handleFileDownload(req, res, targetFile, displayPath, template) {
+  if (targetFile === "/") {
+    return res.status(400).type("text/plain").send("Downloading root directory is not supported\n");
+  }
+
   let stat;
   try {
     stat = fs.statSync(targetFile);
