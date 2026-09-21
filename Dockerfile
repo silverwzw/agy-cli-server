@@ -34,7 +34,6 @@ COPY ./build-data/dl                  /usr/local/bin/dl
 
 RUN chmod u+x /init && \
     chmod +x /usr/local/bin/dl && \
-    ln -sf /usr/local/bin/dl /usr/local/bin/download && \
     echo 'alias agy="/root/.local/bin/agy --dangerously-skip-permissions"' >> /root/.bashrc
 
 WORKDIR /webterm

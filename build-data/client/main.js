@@ -41,9 +41,37 @@ document.title = `${sessionName} - Web Terminal`;
 //                 xterm Setup
 // ===============================================
 
+function linkHandlerActivate(event, url) {
+  if (!url || typeof url !== "string") return;
+
+  console.log(`Opening link uri`);
+
+  if (
+    url.startsWith("/control/download/") ||
+    url.startsWith("http://") ||
+    url.startsWith("https://")
+  ) {
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (_) {
+      window.open(url, "_blank");
+    }
+  }
+}
+
 const term = new Terminal({
   // Search addon relies on proposed API
   allowProposedApi: true,
+  linkHandler: {
+    allowNonHttpProtocols: true,
+    activate: linkHandlerActivate,
+  },
 });
 
 const addon_fit = new FitAddon.FitAddon();

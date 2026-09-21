@@ -13,6 +13,7 @@ for TARGET in "$@"; do
   fi
 
   RESOLVED=$(realpath "$TARGET" 2>/dev/null || readlink -f "$TARGET" 2>/dev/null || echo "$TARGET")
+  RESOLVED="/${RESOLVED#/}"
   URL="/control/download/abs${RESOLVED}"
 
   if [ -d "$RESOLVED" ]; then
