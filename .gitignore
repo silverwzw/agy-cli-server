@@ -1,5 +1,6 @@
 data/secrets/
 .*
+!.agent_worklog
 *.swp
 *.tmp
 tmp/
