@@ -4,6 +4,7 @@ This project provides a containerized web terminal and workspace environment des
 # File Hierarchy
 - `Dockerfile`: Multi-stage Docker build recipe for bundling frontend assets and building the runtime container image.
 - `test.sh`: Script to build and run the development container locally with port mappings and volume mounts.
+- `README.md`: Project documentation and Docker Compose usage guide.
 - `build-data/`: Production application assets and source code packaged into the container:
   - `init`: Container entrypoint script starting the cron daemon and launching the Node.js server.
   - `dl`: Terminal CLI helper script generating clickable ANSI OSC 8 download hyperlinks for files and directories.
