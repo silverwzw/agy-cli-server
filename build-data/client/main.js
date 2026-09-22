@@ -8,7 +8,11 @@ let sessionName = "";
 
 if (pathParts.length >= 2 && (pathParts[0] === "a" || pathParts[0] === "s")) {
   sessionMode = pathParts[0];
-  sessionName = decodeURIComponent(pathParts[1]).trim();
+  try {
+    sessionName = decodeURIComponent(pathParts[1]).trim();
+  } catch (_) {
+    sessionName = pathParts[1].trim();
+  }
 }
 
 const term_div = document.getElementById("terminal");
@@ -67,6 +71,10 @@ function linkHandlerActivate(event, url) {
     }
   } catch (_) {
     return;
+  }
+
+  if (targetUrl.startsWith("/control/download/")) {
+    targetUrl = targetUrl.replace(/#/g, "%23");
   }
 
   if (

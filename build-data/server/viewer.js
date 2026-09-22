@@ -2,7 +2,7 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const escapeHtml = require("escape-html");
-const { noCache, getUserAndGroup, formatBytes, isTextBuffer } = require("./util");
+const { noCache, formatBytes, isTextBuffer } = require("./util");
 
 const MAX_VIEW_SIZE = 2 * 1024 * 1024; // 2 MB maximum supported size for browser rendering
 
@@ -57,20 +57,14 @@ function handleFileView(req, res, targetFile, displayPath, inputPath, pathIsRel,
 
   const filename = path.basename(targetFile);
   const modeOctal = (stat.mode & 0o7777).toString(8);
-  const { userName, groupName, uid, gid } = getUserAndGroup(stat.uid, stat.gid);
-  const downloadUrl = `/control/download/${pathIsRel ? "rel" : "abs"}/${encodeURI(inputPath)}`;
+  const encodedPath = inputPath.split("/").map(encodeURIComponent).join("/");
+  const downloadUrl = `/control/download/${pathIsRel ? "rel" : "abs"}/${encodedPath}`;
 
   const replacements = {
     FILENAME: escapeHtml(filename),
     DISPLAY_PATH: escapeHtml(displayPath),
-    TARGET_FILE: escapeHtml(targetFile),
     FORMATTED_SIZE: escapeHtml(formatBytes(stat.size)),
-    RAW_SIZE: escapeHtml(String(stat.size)),
     MODE_OCTAL: escapeHtml(modeOctal),
-    USER_NAME: escapeHtml(userName),
-    GROUP_NAME: escapeHtml(groupName),
-    UID: escapeHtml(String(uid)),
-    GID: escapeHtml(String(gid)),
     DOWNLOAD_URL: escapeHtml(downloadUrl),
   };
 

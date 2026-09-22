@@ -1,16 +1,8 @@
-function copyFromElement(id, btn) {
+function copyFromElement(id) {
   const el = document.getElementById(id);
   if (!el || !navigator.clipboard?.writeText) return;
 
-  navigator.clipboard.writeText(el.innerText).then(() => {
-    const orig = btn.innerText;
-    btn.innerText = "✓ Copied!";
-    btn.classList.add("copied");
-    setTimeout(() => {
-      btn.innerText = orig;
-      btn.classList.remove("copied");
-    }, 2000);
-  });
+  navigator.clipboard.writeText(el.innerText);
 }
 
 function triggerDirectDownload() {

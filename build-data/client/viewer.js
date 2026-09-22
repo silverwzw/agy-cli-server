@@ -9,12 +9,12 @@ function parseQueryLine() {
   const lineParam = params.get("line");
   if (!lineParam) return null;
   const trimmed = lineParam.trim();
-  const singleMatch = trimmed.match(/^(\d+)$/);
+  const singleMatch = trimmed.match(/^L?(\d+)$/i);
   if (singleMatch) {
     const line = parseInt(singleMatch[1], 10);
     return line >= 1 ? { start: line, end: line } : null;
   }
-  const rangeMatch = trimmed.match(/^(\d+)-(\d+)$/);
+  const rangeMatch = trimmed.match(/^L?(\d+)-L?(\d+)$/i);
   if (rangeMatch) {
     const n1 = parseInt(rangeMatch[1], 10);
     const n2 = parseInt(rangeMatch[2], 10);
@@ -129,15 +129,7 @@ if (copyPathBtn) {
   copyPathBtn.addEventListener("click", () => {
     const pathText = copyPathBtn.getAttribute("data-path") || "";
     if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(pathText).then(() => {
-        const orig = copyPathBtn.textContent;
-        copyPathBtn.textContent = "✓ Copied!";
-        copyPathBtn.classList.add("copied");
-        setTimeout(() => {
-          copyPathBtn.textContent = orig;
-          copyPathBtn.classList.remove("copied");
-        }, 2000);
-      });
+      navigator.clipboard.writeText(pathText);
     }
   });
 }
@@ -152,15 +144,7 @@ if (copyContentBtn) {
       : fileText;
 
     if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(textToCopy).then(() => {
-        const orig = copyContentBtn.textContent;
-        copyContentBtn.textContent = "✓ Copied!";
-        copyContentBtn.classList.add("copied");
-        setTimeout(() => {
-          copyContentBtn.textContent = orig;
-          copyContentBtn.classList.remove("copied");
-        }, 2000);
-      });
+      navigator.clipboard.writeText(textToCopy);
     }
   });
 }

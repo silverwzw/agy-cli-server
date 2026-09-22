@@ -14,7 +14,8 @@ for TARGET in "$@"; do
 
   RESOLVED=$(realpath "$TARGET" 2>/dev/null || readlink -f "$TARGET" 2>/dev/null || echo "$TARGET")
   RESOLVED="/${RESOLVED#/}"
-  URL="/control/download/abs${RESOLVED}"
+  ENCODED_RESOLVED=$(echo "$RESOLVED" | sed 's/#/%23/g')
+  URL="/control/download/abs${ENCODED_RESOLVED}"
 
   if [ -d "$RESOLVED" ]; then
     echo "Directory: $RESOLVED (download as .tar.gz)"
