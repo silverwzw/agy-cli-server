@@ -119,6 +119,24 @@ function handleFileDownload(req, res, targetFile, displayPath, template) {
     return res.status(400).type("text/plain").send(`Unsupported file type: ${displayPath}\n`);
   }
 
+  const downloadParam = req.query.download;
+  const isDirectText = downloadParam === "false" || downloadParam === "0";
+
+  if (isDirectText) {
+    if (stat.isDirectory()) {
+      return res.status(400).type("text/plain").send(`Cannot output directory as text/plain: ${displayPath}\n`);
+    }
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    const stream = fs.createReadStream(targetFile);
+    stream.on("error", (err) => {
+      console.error(`Error reading file [${targetFile}]:`, err);
+      if (!res.headersSent) {
+        res.status(500).type("text/plain").send(`Error reading file: ${err.message}\n`);
+      }
+    });
+    return stream.pipe(res);
+  }
+
   const isHtmlClient = req.headers["accept"]?.includes("text/html");
   const ua = (req.headers["user-agent"] || "").toLowerCase();
   const isCli = CLI_UA_KEYWORDS.some((kw) => ua.includes(kw));

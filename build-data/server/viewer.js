@@ -32,9 +32,18 @@ function handleFileView(req, res, targetFile, displayPath, inputPath, pathIsRel,
     return res.status(400).type("text/plain").send(`File is too large to view (${formatBytes(stat.size)} > 2 MB). Use /control/download to download it.\n`);
   }
 
-  let contentBuffer;
+  let sampleBuffer;
   try {
-    contentBuffer = fs.readFileSync(targetFile);
+    const fd = fs.openSync(targetFile, "r");
+    try {
+      const readLen = Math.min(stat.size, 8192);
+      sampleBuffer = Buffer.alloc(readLen);
+      if (readLen > 0) {
+        fs.readSync(fd, sampleBuffer, 0, readLen, 0);
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
   } catch (err) {
     if (err.code === "EACCES") {
       return res.status(403).type("text/plain").send(`Permission denied: ${displayPath}\n`);
@@ -42,42 +51,8 @@ function handleFileView(req, res, targetFile, displayPath, inputPath, pathIsRel,
     return res.status(500).type("text/plain").send(`Error reading file: ${err.message}\n`);
   }
 
-  if (!isTextBuffer(contentBuffer)) {
+  if (!isTextBuffer(sampleBuffer)) {
     return res.status(400).type("text/plain").send(`Cannot view binary file: ${displayPath} is not a text file\n`);
-  }
-
-  const rawContent = contentBuffer.toString("utf-8");
-  let rawLines;
-  if (rawContent.length === 0) {
-    rawLines = [];
-  } else {
-    rawLines = rawContent.split(/\r?\n/);
-    if (rawContent.endsWith("\n") && rawLines[rawLines.length - 1] === "") {
-      rawLines.pop();
-    }
-  }
-
-  const totalLines = rawLines.length;
-  const numDigits = Math.max(String(totalLines).length, 1);
-  const gutterWidth = Math.max(48, numDigits * 9 + 24);
-
-  let rowsHtml = "";
-  if (totalLines === 0) {
-    rowsHtml = `<div class="empty-file-row"><span class="empty-file-text">Empty file (0 lines)</span></div>`;
-  } else {
-    const rows = [];
-    for (let i = 0; i < totalLines; i++) {
-      const lineNum = i + 1;
-      const escapedLine = escapeHtml(rawLines[i]);
-
-      rows.push(
-        `<div class="line-row" id="L${lineNum}" data-line="${lineNum}">` +
-        `<a class="line-num" href="?line=${lineNum}" data-line="${lineNum}">${lineNum}</a>` +
-        `<span class="line-content">${escapedLine}</span>` +
-        `</div>`
-      );
-    }
-    rowsHtml = rows.join("\n");
   }
 
   const filename = path.basename(targetFile);
@@ -91,15 +66,12 @@ function handleFileView(req, res, targetFile, displayPath, inputPath, pathIsRel,
     TARGET_FILE: escapeHtml(targetFile),
     FORMATTED_SIZE: escapeHtml(formatBytes(stat.size)),
     RAW_SIZE: escapeHtml(String(stat.size)),
-    TOTAL_LINES: escapeHtml(String(totalLines)),
     MODE_OCTAL: escapeHtml(modeOctal),
     USER_NAME: escapeHtml(userName),
     GROUP_NAME: escapeHtml(groupName),
     UID: escapeHtml(String(uid)),
     GID: escapeHtml(String(gid)),
     DOWNLOAD_URL: escapeHtml(downloadUrl),
-    FILE_CONTENT_ROWS: rowsHtml,
-    GUTTER_WIDTH: `${gutterWidth}px`,
   };
 
   const html = template.replace(/\{\{(\w+)\}\}/g, (_, key) => replacements[key] ?? "");

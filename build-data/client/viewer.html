@@ -189,11 +189,16 @@
       white-space: pre-wrap;
       word-break: break-all;
     }
-    .empty-file-row {
+    .loading-row,
+    .empty-file-row,
+    .error-row {
       padding: 32px 16px;
       text-align: center;
       color: #64748b;
       font-style: italic;
+    }
+    .error-row {
+      color: #f87171;
     }
   </style>
 </head>
@@ -215,7 +220,7 @@
     <div class="toolbar">
       <div class="toolbar-left">
         <span class="file-path-badge">{{DISPLAY_PATH}}</span>
-        <span class="badge">{{TOTAL_LINES}} lines</span>
+        <span id="badge-lines" class="badge">Loading...</span>
         <span class="badge">{{FORMATTED_SIZE}}</span>
         <span class="badge">{{MODE_OCTAL}}</span>
         <span id="line-indicator" class="badge badge-highlight" style="display: none;"></span>
@@ -224,13 +229,13 @@
         <button id="btn-copy-path" class="btn-tool" data-path="{{DISPLAY_PATH}}">📋 Copy Path</button>
         <button id="btn-copy-content" class="btn-tool">📄 Copy Content</button>
         <button id="btn-toggle-wrap" class="btn-tool">Wrap Lines</button>
-        <a href="{{DOWNLOAD_URL}}" class="btn-tool">Download</a>
+        <a href="{{DOWNLOAD_URL}}" class="btn-tool" id="btn-download">Download</a>
       </div>
     </div>
 
-    <div class="code-wrapper" id="code-wrapper" style="--gutter-width: {{GUTTER_WIDTH}};">
-      <div class="code-lines">
-        {{FILE_CONTENT_ROWS}}
+    <div class="code-wrapper" id="code-wrapper" data-download-url="{{DOWNLOAD_URL}}" style="--gutter-width: 48px;">
+      <div class="code-lines" id="code-lines">
+        <div class="loading-row"><span class="loading-text">Loading file content...</span></div>
       </div>
     </div>
   </div>

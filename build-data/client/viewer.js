@@ -1,4 +1,8 @@
 let lastClickedLine = null;
+let fileText = "";
+let fileLines = [];
+
+const escapeHtml = require("escape-html");
 
 function parseQueryLine() {
   const params = new URLSearchParams(window.location.search);
@@ -143,22 +147,9 @@ const copyContentBtn = document.getElementById("btn-copy-content");
 if (copyContentBtn) {
   copyContentBtn.addEventListener("click", () => {
     const current = parseQueryLine();
-    let textToCopy = "";
-    if (current) {
-      const lines = [];
-      for (let i = current.start; i <= current.end; i++) {
-        const row = document.getElementById("L" + i);
-        if (row) {
-          lines.push(row.querySelector(".line-content")?.textContent || "");
-        }
-      }
-      textToCopy = lines.join("\n");
-    } else {
-      const allRows = document.querySelectorAll(".line-row");
-      textToCopy = Array.from(allRows)
-        .map((r) => r.querySelector(".line-content")?.textContent || "")
-        .join("\n");
-    }
+    const textToCopy = current
+      ? fileLines.slice(current.start - 1, current.end).join("\n")
+      : fileText;
 
     if (navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(textToCopy).then(() => {
@@ -185,10 +176,82 @@ function initViewer() {
   }
 }
 
+window.addEventListener("popstate", () => {
+  const current = parseQueryLine();
+  if (current) {
+    updateHighlights(current.start, current.end);
+    scrollToLine(current.start, true);
+  } else {
+    updateHighlights(null, null);
+  }
+});
+
+// Fetch file content from /control/download and render lines DOM
+async function loadFileContent() {
+  const codeWrapper = document.getElementById("code-wrapper");
+  const codeLines = document.getElementById("code-lines");
+  const badgeLines = document.getElementById("badge-lines");
+  if (!codeWrapper || !codeLines) return;
+
+  const downloadUrl = codeWrapper.getAttribute("data-download-url") ||
+    document.getElementById("btn-download")?.getAttribute("href") ||
+    window.location.pathname.replace(/^\/control\/viewer\//, "/control/download/");
+  const contentUrl = `${downloadUrl}${downloadUrl.includes("?") ? "&" : "?"}download=0`;
+
+  try {
+    const res = await fetch(contentUrl);
+    if (!res.ok) {
+      const errText = await res.text();
+      if (badgeLines) badgeLines.textContent = "Error";
+      codeLines.innerHTML = `<div class="error-row"><span class="error-text">Failed to load file content: ${escapeHtml(errText.trim() || res.statusText)}</span></div>`;
+      return;
+    }
+
+    fileText = await res.text();
+    if (fileText.length === 0) {
+      fileLines = [];
+    } else {
+      fileLines = fileText.split(/\r?\n/);
+      if (fileText.endsWith("\n") && fileLines[fileLines.length - 1] === "") {
+        fileLines.pop();
+      }
+    }
+
+    const totalLines = fileLines.length;
+    const numDigits = Math.max(String(totalLines).length, 1);
+    const gutterWidth = Math.max(48, numDigits * 9 + 24);
+    codeWrapper.style.setProperty("--gutter-width", `${gutterWidth}px`);
+
+    if (badgeLines) {
+      badgeLines.textContent = `${totalLines} ${totalLines === 1 ? "line" : "lines"}`;
+    }
+
+    if (totalLines === 0) {
+      codeLines.innerHTML = '<div class="empty-file-row"><span class="empty-file-text">Empty file (0 lines)</span></div>';
+    } else {
+      const rows = [];
+      for (let i = 0; i < totalLines; i++) {
+        const lineNum = i + 1;
+        const escapedLine = escapeHtml(fileLines[i]);
+        rows.push(
+          `<div class="line-row" id="L${lineNum}" data-line="${lineNum}">` +
+          `<a class="line-num" href="?line=${lineNum}" data-line="${lineNum}">${lineNum}</a>` +
+          `<span class="line-content">${escapedLine}</span>` +
+          `</div>`
+        );
+      }
+      codeLines.innerHTML = rows.join("\n");
+    }
+
+    setTimeout(initViewer, 20);
+  } catch (err) {
+    if (badgeLines) badgeLines.textContent = "Error";
+    codeLines.innerHTML = `<div class="error-row"><span class="error-text">Network error loading file content: ${escapeHtml(err.message || String(err))}</span></div>`;
+  }
+}
+
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => {
-    setTimeout(initViewer, 60);
-  });
+  document.addEventListener("DOMContentLoaded", loadFileContent);
 } else {
-  setTimeout(initViewer, 60);
+  loadFileContent();
 }

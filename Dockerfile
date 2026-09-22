@@ -10,7 +10,7 @@ COPY ["./build-data/client/*.js", "/build/"]
 
 RUN npx --yes esbuild upload.js   --minify --allow-overwrite --bundle --outfile=upload.js && \
     npx --yes esbuild download.js --minify --allow-overwrite --outfile=download.js && \
-    npx --yes esbuild viewer.js   --minify --allow-overwrite --outfile=viewer.js && \
+    npx --yes esbuild viewer.js   --minify --allow-overwrite --bundle --outfile=viewer.js && \
     npx --yes esbuild main.js     --minify --allow-overwrite --outfile=main.js
 
 FROM debian:stable-slim AS final
