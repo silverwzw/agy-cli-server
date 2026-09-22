@@ -2,31 +2,10 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
-const posix = require("posix");
 const escapeHtml = require("escape-html");
-const { isPrefetchOrPrerender, noCache } = require("./util");
+const { isPrefetchOrPrerender, noCache, getUserAndGroup, formatBytes } = require("./util");
 
 const CLI_UA_KEYWORDS = ["curl", "wget", "aria", "axel", "httpie", "fetch/"];
-
-function getUserAndGroup(uid, gid) {
-  let userName = String(uid);
-  let groupName = String(gid);
-  try {
-    userName = posix.getpwnam(uid).name;
-  } catch (e) {}
-  try {
-    groupName = posix.getgrnam(gid).name;
-  } catch (e) {}
-  return { userName, groupName, uid, gid };
-}
-
-function formatBytes(bytes) {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return (bytes / Math.pow(k, i)).toFixed(2) + " " + sizes[i];
-}
 
 function getDownloadHtml(targetFile, stat, rawUrl, template) {
   const isDirectory = stat.isDirectory();

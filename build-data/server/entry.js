@@ -9,6 +9,7 @@ const os = require("os");
 const { exec } = require("child_process");
 const { createUploadRouter } = require("./upload");
 const { createDownloadRouter } = require("./download");
+const { createViewerRouter } = require("./viewer");
 const { isPrefetchOrPrerender, noCache } = require("./util");
 
 // TODO: voice input
@@ -42,6 +43,7 @@ const ROUTING_TABLE = {
   "/static/main.js": "client/main.js",
   "/static/upload.js": "client/upload.js",
   "/static/download.js": "client/download.js",
+  "/static/viewer.js": "client/viewer.js",
   "/static/xterm.js": "node_modules/@xterm/xterm/lib/xterm.js",
   "/static/xterm-clipboard.js": "node_modules/@xterm/addon-clipboard/lib/addon-clipboard.js",
   "/static/xterm-fit.js": "node_modules/@xterm/addon-fit/lib/addon-fit.js",
@@ -432,6 +434,9 @@ handler.use(createUploadRouter({ ROOT_DIR, WORK_DIR }));
 
 // 11. File Download routes
 handler.use(createDownloadRouter({ ROOT_DIR, WORK_DIR }));
+
+// 12. File Viewer routes
+handler.use(createViewerRouter({ ROOT_DIR, WORK_DIR }));
 
 // Redirect /, /a, /s
 handler.get(["/", "/a", "/a/", "/s", "/s/"], (req, res) => {
