@@ -41,27 +41,66 @@ document.title = `${sessionName} - Web Terminal`;
 //                 xterm Setup
 // ===============================================
 
+function resolveFileViewerUrl(url) {
+  if (!url || typeof url !== "string" || !url.startsWith("file:///")) return null;
+
+  try {
+    const parsed = new URL(url);
+    const rawPath = parsed.pathname.replace(/^\/+/, "");
+    if (!rawPath) return null;
+
+    let targetUrl = `/control/viewer/abs/${rawPath}`;
+    const hash = parsed.hash.replace(/^#/, "").trim();
+    if (hash) {
+      const singleMatch = hash.match(/^L?(\d+)$/i);
+      if (singleMatch) {
+        targetUrl += `?line=${singleMatch[1]}`;
+      } else {
+        const rangeMatch = hash.match(/^L?(\d+)-L?(\d+)$/i);
+        if (rangeMatch) {
+          targetUrl += `?line=${rangeMatch[1]}-${rangeMatch[2]}`;
+        }
+      }
+    }
+    return targetUrl;
+  } catch (_) {
+    return null;
+  }
+}
+
+function openLink(targetUrl) {
+  try {
+    const a = document.createElement("a");
+    a.href = targetUrl;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch (_) {
+    window.open(targetUrl, "_blank");
+  }
+}
+
 function linkHandlerActivate(event, url) {
   if (!url || typeof url !== "string") return;
 
-  console.log(`Opening link uri`);
+  console.log(`Opening link uri: ${url}`);
+
+  if (url.startsWith("file:///")) {
+    const viewerUrl = resolveFileViewerUrl(url);
+    if (viewerUrl) {
+      openLink(viewerUrl);
+      return;
+    }
+  }
 
   if (
     url.startsWith("/control/download/") ||
     url.startsWith("http://") ||
     url.startsWith("https://")
   ) {
-    try {
-      const a = document.createElement("a");
-      a.href = url;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch (_) {
-      window.open(url, "_blank");
-    }
+    openLink(url);
   }
 }
 
