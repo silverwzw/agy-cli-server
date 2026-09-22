@@ -41,15 +41,18 @@ document.title = `${sessionName} - Web Terminal`;
 //                 xterm Setup
 // ===============================================
 
-function resolveFileViewerUrl(url) {
-  if (!url || typeof url !== "string" || !url.startsWith("file:///")) return null;
+function linkHandlerActivate(event, url) {
+  if (!url || typeof url !== "string") return;
 
-  try {
+  console.log(`Opening link uri: ${url}`);
+
+  let targetUrl = url;
+  if (url.startsWith("file:///")) try {
     const parsed = new URL(url);
     const rawPath = parsed.pathname.replace(/^\/+/, "");
-    if (!rawPath) return null;
+    if (!rawPath) return;
 
-    let targetUrl = `/control/viewer/abs/${rawPath}`;
+    targetUrl = `/control/viewer/abs/${rawPath}`;
     const hash = parsed.hash.replace(/^#/, "").trim();
     if (hash) {
       const singleMatch = hash.match(/^L?(\d+)$/i);
@@ -62,14 +65,16 @@ function resolveFileViewerUrl(url) {
         }
       }
     }
-    return targetUrl;
   } catch (_) {
-    return null;
+    return;
   }
-}
 
-function openLink(targetUrl) {
-  try {
+  if (
+    targetUrl.startsWith("/control/download/") ||
+    targetUrl.startsWith("/control/viewer/") ||
+    targetUrl.startsWith("http://") ||
+    targetUrl.startsWith("https://")
+  ) try {
     const a = document.createElement("a");
     a.href = targetUrl;
     a.target = "_blank";
@@ -79,28 +84,6 @@ function openLink(targetUrl) {
     document.body.removeChild(a);
   } catch (_) {
     window.open(targetUrl, "_blank");
-  }
-}
-
-function linkHandlerActivate(event, url) {
-  if (!url || typeof url !== "string") return;
-
-  console.log(`Opening link uri: ${url}`);
-
-  if (url.startsWith("file:///")) {
-    const viewerUrl = resolveFileViewerUrl(url);
-    if (viewerUrl) {
-      openLink(viewerUrl);
-      return;
-    }
-  }
-
-  if (
-    url.startsWith("/control/download/") ||
-    url.startsWith("http://") ||
-    url.startsWith("https://")
-  ) {
-    openLink(url);
   }
 }
 
