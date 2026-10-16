@@ -12,9 +12,9 @@ for TARGET in "$@"; do
     continue
   fi
 
-  RESOLVED=$(realpath "$TARGET" 2>/dev/null || readlink -f "$TARGET" 2>/dev/null || echo "$TARGET")
+  RESOLVED=$(realpath -- "$TARGET" 2>/dev/null || readlink -f -- "$TARGET" 2>/dev/null || echo "$TARGET")
   RESOLVED="/${RESOLVED#/}"
-  ENCODED_RESOLVED=$(echo "$RESOLVED" | sed 's/#/%23/g')
+  ENCODED_RESOLVED=$(node -e 'process.stdout.write(process.argv[1].split("/").map(encodeURIComponent).join("/"))' -- "$RESOLVED")
   URL="/control/download/abs${ENCODED_RESOLVED}"
 
   if [ -d "$RESOLVED" ]; then

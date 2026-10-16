@@ -15,6 +15,8 @@ const { isPrefetchOrPrerender, noCache } = require("./util");
 // TODO: voice input
 // TODO: overlay
 // TODO: mobile adapt
+// TODO: control/roundrobin
+// TODO: control/alias
 
 // =======================================================
 //                    Global Constants
@@ -27,7 +29,7 @@ const SHELL_CMD = "/bin/bash";
 const SHELL_ARGS = [];
 
 const AGY_BIN = "/root/.local/bin/agy";
-const AGY_ARGS = ["--dangerously-skip-permissions"];
+const AGY_ARGS = ["--dangerously-skip-permissions", "--remote-control"];
 
 const MAX_ALIGNMENT_SEARCH_WINDOW = 4096;
 
@@ -455,6 +457,11 @@ handler.get(["/a/:name", "/s/:name"], (req, res) => {
   if (cleanedSessions.has(name)) {
     return res.status(410).type("text/plain").send(`Session "${name}" has been cleaned up\n`);
   }
+  const existingSession = sessions.get(name);
+  if (existingSession && existingSession.mode !== mode) {
+    const search = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+    return res.redirect(`/${existingSession.mode}/${encodeURIComponent(name)}${search}`);
+  }
   res.sendFile(indexHtmlPath);
 });
 
@@ -478,14 +485,18 @@ handler.use((err, req, res, next) => {
 // =======================================================
 
 ws.use((socket, next) => {
-  const sessionName = socket.handshake.query?.name;
+  const sessionName = String(socket.handshake.query?.name || "").trim();
   const sessionMode = socket.handshake.query?.mode;
 
-  if (!sessionName || !sessionMode) {
-    return next(new Error("Missing session name or mode in socket query"));
+  if (!sessionName || (sessionMode !== "a" && sessionMode !== "s")) {
+    return next(new Error("Missing or invalid session name or mode in socket query"));
   }
   if (cleanedSessions.has(sessionName)) {
     return next(new Error(`Session "${sessionName}" has been cleaned up`));
+  }
+  const existingSession = sessions.get(sessionName);
+  if (existingSession && existingSession.mode !== sessionMode) {
+    return next(new Error(`Session "${sessionName}" is running in /${existingSession.mode} mode`));
   }
   next();
 });
@@ -493,7 +504,8 @@ ws.use((socket, next) => {
 ws.on("connection", (socket) => {
   const ip = extractSocketIp(socket);
   const url = extractSocketUrl(socket);
-  const session = getOrCreateSession(socket.handshake.query.name, socket.handshake.query.mode, { ip, url });
+  const sessionName = String(socket.handshake.query?.name || "").trim();
+  const session = getOrCreateSession(sessionName, socket.handshake.query.mode, { ip, url });
   if (!session || !session.ptyProcess) {
     return;
   }

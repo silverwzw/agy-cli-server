@@ -83,13 +83,8 @@ function createViewerRouter({ ROOT_DIR, WORK_DIR }) {
   // Be cautious when adding parameters: Express distinguishes error-handling middleware
   // by checking `fn.length === 4`. Ensure the resulting bound function's arity does not become 4.
   function handler(pathIsRel, req, res) {
-    let inputPath = Array.isArray(req.params.path) ? req.params.path.join("/") : (req.params.path || "");
-    try {
-      inputPath = decodeURIComponent(inputPath).trim();
-    } catch (_) {
-      return res.status(400).type("text/plain").send("Malformed URL encoding in path\n");
-    }
-    if (!inputPath) {
+    const inputPath = Array.isArray(req.params.path) ? req.params.path.join("/") : (req.params.path || "");
+    if (!inputPath.trim()) {
       return res.status(400).type("text/plain")
                 .send(`Missing path. Usage: /control/viewer/${pathIsRel ? "rel" : "abs"}/<path>\n`);
     }

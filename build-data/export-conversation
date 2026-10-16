@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Export an Antigravity CLI conversation's assets into a .tar.gz archive
+# preserving paths relative to ~/.gemini/antigravity-cli/, and print a download link.
+
+set -euo pipefail
+
+if [ $# -ne 1 ] || [ -z "$1" ]; then
+  echo "Usage: $(basename "$0") <conversation_id_prefix>" >&2
+  exit 1
+fi
+
+PREFIX="$1"
+
+case "$PREFIX" in
+  */*|*..*)
+    echo "Error: Invalid prefix '$PREFIX'." >&2
+    exit 1
+    ;;
+esac
+
+AGY_DIR="${HOME}/.gemini/antigravity-cli"
+CONV_DIR="${AGY_DIR}/conversations"
+
+if [ ! -d "$CONV_DIR" ]; then
+  echo "Error: Conversations directory not found: $CONV_DIR" >&2
+  exit 1
+fi
+
+shopt -s nullglob
+matches=( "${CONV_DIR}/${PREFIX}"*.db )
+shopt -u nullglob
+
+if [ ${#matches[@]} -eq 0 ]; then
+  echo "Error: No conversation found matching prefix '$PREFIX'." >&2
+  exit 1
+fi
+
+if [ ${#matches[@]} -gt 1 ]; then
+  echo "Error: Prefix '$PREFIX' matches multiple (${#matches[@]}) conversations:" >&2
+  for m in "${matches[@]}"; do
+    echo "  - $(basename "$m" .db)" >&2
+  done
+  exit 1
+fi
+
+CONV_ID="$(basename "${matches[0]}" .db)"
+
+assets=( "conversations/${CONV_ID}.db" )
+
+if [ -f "${AGY_DIR}/conversations/${CONV_ID}.db-wal" ]; then
+  assets+=( "conversations/${CONV_ID}.db-wal" )
+fi
+if [ -f "${AGY_DIR}/conversations/${CONV_ID}.db-shm" ]; then
+  assets+=( "conversations/${CONV_ID}.db-shm" )
+fi
+if [ -d "${AGY_DIR}/brain/${CONV_ID}" ]; then
+  assets+=( "brain/${CONV_ID}" )
+fi
+if [ -f "${AGY_DIR}/annotations/${CONV_ID}.pbtxt" ]; then
+  assets+=( "annotations/${CONV_ID}.pbtxt" )
+fi
+
+OUT_FILE="conversation-${CONV_ID}.tar.gz"
+tar --warning=no-file-changed --ignore-failed-read -czf "$OUT_FILE" -C "$AGY_DIR" "${assets[@]}"
+
+dl "$OUT_FILE"

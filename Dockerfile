@@ -32,9 +32,10 @@ RUN curl -fsSL https://antigravity.google/cli/install.sh | /bin/bash
 COPY ./build-data/settings.json       /root/.gemini/antigravity-cli/settings.json
 COPY ./build-data/init                /init
 COPY ./build-data/dl                  /usr/local/bin/dl
+COPY ./build-data/export-conversation /usr/local/bin/export-conversation
 
 RUN chmod u+x /init && \
-    chmod +x /usr/local/bin/dl && \
+    chmod 0755 /usr/local/bin/dl /usr/local/bin/export-conversation && \
     echo 'alias agy="/root/.local/bin/agy --dangerously-skip-permissions"' >> /root/.bashrc
 
 WORKDIR /webterm
