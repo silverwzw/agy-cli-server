@@ -15,6 +15,7 @@ A containerized full permission Antigravity CLI, accessible through web browser.
   - Integrated terminal features: in-terminal search (`Ctrl+F` / `Cmd+F`), OSC 9;4 terminal progress bar, clipboard integration, CJK characters support and image addon.
 - **In-Terminal Hyperlinks & Seamless Viewer Navigation**:
   - Built-in `dl` helper command generates clickable ANSI OSC 8 download links directly in terminal output.
+  - Built-in `export-conversation <id_prefix>` helper packages an `agy` conversation's database and brain assets into a `.tar.gz` archive with a download link.
   - Native xterm `linkHandler` intercepts `file:///` URLs (e.g., `file:///path/to/file#L10-L20`) and automatically opens the target file in the web viewer at the designated line range.
 - **Bidirectional File Management**:
   - **Streaming Downloads** (`/control/download`): Downloads single files or dynamically archives whole directories as `.tar.gz`. Displays original file permissions, ownership, and copyable `chmod`/`chown` restore commands.
@@ -154,6 +155,7 @@ docker compose up -d
 | `/a/:name` | Attach to the exisiting or create a new `agy` CLI session.  |
 | `/s/:name` | Attach to the exisiting or create a new shell session. |
 | `/control/list` | Returns JSON list of active terminal sessions (PID, clients, uptime). |
+| `/rr` or `/control/roundrobin` | Redirects to the next active session in round-robin order using client cookies. |
 | `/control/abort/:name` | Kills the session's PTY process tree and terminates the session. |
 | `/control/download/{abs,rel}/<path>` | Downloads file or streams dynamic `.tar.gz` of the specified path. Append `?raw` for direct stream, `?download=0` for plain text. |
 | `/control/upload` | `GET` serves upload page; `PUT` streams file upload with atomic rename. |

@@ -7,6 +7,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const { exec } = require("child_process");
+const cookieParser = require("cookie-parser");
 const { createUploadRouter } = require("./upload");
 const { createDownloadRouter } = require("./download");
 const { createViewerRouter } = require("./viewer");
@@ -15,7 +16,6 @@ const { isPrefetchOrPrerender, noCache } = require("./util");
 // TODO: voice input
 // TODO: overlay
 // TODO: mobile adapt
-// TODO: control/roundrobin
 // TODO: control/alias
 
 // =======================================================
@@ -32,6 +32,7 @@ const AGY_BIN = "/root/.local/bin/agy";
 const AGY_ARGS = ["--dangerously-skip-permissions", "--remote-control"];
 
 const MAX_ALIGNMENT_SEARCH_WINDOW = 4096;
+const RR_COOKIE_NAME = "rr_session";
 
 const ENV = {
   ...process.env,
@@ -62,6 +63,7 @@ const ROUTING_TABLE = {
 
 const handler = express();
 handler.set("trust proxy", true);
+handler.use(cookieParser());
 
 const server = http.createServer(handler);
 const ws = socket(server, {
@@ -430,6 +432,48 @@ handler.all(["/control/abort/:name", "/control/abort/:name/"], (req, res) => {
 
   res.status(200).type("json").send(JSON.stringify({ ok: true, name }, null, 2) + "\n");
 });
+
+// Round-robin active sessions
+handler.all(
+  ["/rr", "/rr/", "/control/roundrobin", "/control/roundrobin/"],
+  noCache,
+  (req, res) => {
+    if (isPrefetchOrPrerender(req)) {
+      return res.status(400).type("text/plain").send("Prefetch / prerender request not supported for roundrobin url\n");
+    }
+
+    if (req.method !== "GET") {
+      return res.status(405).type("text/plain").send(`Unsupported method ${req.method}\n`);
+    }
+
+    const activeSessions = [...sessions]
+      .map(([, s]) => s)
+      .filter((s) => s.ptyProcess && !s.cleanedUp && !s.exited);
+
+    if (activeSessions.length === 0) {
+      return res.status(404).type("text/plain").send("No active sessions\n");
+    }
+
+    const lastSessionName = req.cookies?.[RR_COOKIE_NAME];
+
+    let nextIndex = 0;
+    if (lastSessionName) {
+      const currentIndex = activeSessions.findIndex((s) => s.name === lastSessionName);
+      if (currentIndex !== -1) {
+        nextIndex = (currentIndex + 1) % activeSessions.length;
+      }
+    }
+
+    const targetSession = activeSessions[nextIndex];
+    res.cookie(RR_COOKIE_NAME, targetSession.name, {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+    });
+
+    res.redirect(`/${targetSession.mode}/${encodeURIComponent(targetSession.name)}`);
+  }
+);
 
 // 10. File Upload routes
 handler.use(createUploadRouter({ ROOT_DIR, WORK_DIR }));
