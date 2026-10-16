@@ -16,7 +16,6 @@ const { isPrefetchOrPrerender, noCache } = require("./util");
 // TODO: voice input
 // TODO: overlay
 // TODO: mobile adapt
-// TODO: control/alias
 
 // =======================================================
 //                    Global Constants
@@ -77,6 +76,15 @@ const ws = socket(server, {
 
 const sessions = new Map();
 const cleanedSessions = new Set();
+const sessionAliases = new Map();
+
+function resolveSession(identifier) {
+  if (sessions.has(identifier)) {
+    return sessions.get(identifier);
+  }
+  const targetName = sessionAliases.get(identifier);
+  return targetName ? sessions.get(targetName) : undefined;
+}
 
 function extractSocketIp(socket) {
   let ip =
@@ -190,6 +198,7 @@ class Session {
     this.args = this.mode === "s" ? SHELL_ARGS : AGY_ARGS;
     this.createdAt = new Date();
     this.clients = new Set();
+    this.aliases = new Set();
     this.buffer = "";
     this.maxBufferLength = 256 * 1024;
     this.ptyProcess = null;
@@ -294,6 +303,10 @@ class Session {
       ws.to(`session:${this.name}`).emit("t.s2c", msg);
     }
     ws.to(`session:${this.name}`).emit("s.aborted", { name: this.name, reason: this.aborted });
+    for (const alias of this.aliases) {
+      sessionAliases.delete(alias);
+    }
+    this.aliases.clear();
     sessions.delete(this.name);
     cleanedSessions.add(this.name);
 
@@ -328,7 +341,7 @@ function generateSessionName() {
   let name;
   do {
     name = crypto.randomBytes(4).toString("hex");
-  } while (sessions.has(name) || cleanedSessions.has(name));
+  } while (sessions.has(name) || cleanedSessions.has(name) || sessionAliases.has(name));
   return name;
 }
 
@@ -336,8 +349,9 @@ function getOrCreateSession(name, mode, creator = {}) {
   if (cleanedSessions.has(name)) {
     return null;
   }
-  if (sessions.has(name)) {
-    return sessions.get(name);
+  const existing = resolveSession(name);
+  if (existing) {
+    return existing;
   }
   const session = new Session(name, mode, creator);
   sessions.set(name, session);
@@ -397,6 +411,7 @@ handler.get(["/control/list", "/control/list/"], noCache, (req, res) => {
   for (const [name, session] of sessions.entries()) {
     sessionList.push({
       name: session.name,
+      aliases: Array.from(session.aliases),
       mode: session.mode, // "a" | "s"
       command: session.command,
       args: session.args,
@@ -420,7 +435,7 @@ handler.all(["/control/abort/:name", "/control/abort/:name/"], (req, res) => {
   }
 
   const name = String(req.params.name || "").trim();
-  const session = sessions.get(name);
+  const session = resolveSession(name);
   if (!session) {
     if (cleanedSessions.has(name)) {
       return res.status(410).type("text/plain").send(`Session "${name}" has been cleaned up\n`);
@@ -428,9 +443,71 @@ handler.all(["/control/abort/:name", "/control/abort/:name/"], (req, res) => {
     return res.status(404).type("text/plain").send(`Session "${name}" not found\n`);
   }
 
+  const targetName = session.name;
   session.abort(Session.ABORTED_BY_SERVER);
 
-  res.status(200).type("json").send(JSON.stringify({ ok: true, name }, null, 2) + "\n");
+  res.status(200).type("json").send(JSON.stringify({ ok: true, name: targetName }, null, 2) + "\n");
+});
+
+// Add alias for a session
+handler.all(
+  ["/control/alias/:identifier/:alias", "/control/alias/:identifier/:alias/"],
+  noCache,
+  (req, res) => {
+    if (isPrefetchOrPrerender(req)) {
+      return res.status(400).type("text/plain").send("Prefetch / prerender request not supported for alias url\n");
+    }
+
+    if (req.method !== "GET" && req.method !== "POST" && req.method !== "PUT") {
+      return res.status(405).type("text/plain").send(`Unsupported method ${req.method}\n`);
+    }
+
+    const identifier = String(req.params.identifier || "").trim();
+    const alias = String(req.params.alias || "").trim();
+    if (!identifier || !alias) {
+      return res.status(400).type("text/plain").send("Usage: /control/alias/<session_identifier>/<alias_name>\n");
+    }
+
+    const session = resolveSession(identifier);
+    if (!session || session.cleanedUp || session.exited) {
+      if (cleanedSessions.has(identifier)) {
+        return res.status(410).type("text/plain").send(`Session "${identifier}" has been cleaned up\n`);
+      }
+      return res.status(404).type("text/plain").send(`Session "${identifier}" not found\n`);
+    }
+
+    if (sessions.has(alias)) {
+      return res.status(409).type("text/plain").send(`Alias "${alias}" conflicts with active session "${alias}"\n`);
+    }
+
+    const existingOwner = sessionAliases.get(alias);
+    if (existingOwner) {
+      return res.status(409).type("text/plain").send(`Alias "${alias}" is already in use by session "${existingOwner}"\n`);
+    }
+
+    sessionAliases.set(alias, session.name);
+    session.aliases.add(alias);
+
+    res.status(200).type("json").send(
+      JSON.stringify(
+        {
+          ok: true,
+          name: session.name,
+          alias,
+          aliases: Array.from(session.aliases),
+        },
+        null,
+        2
+      ) + "\n"
+    );
+  }
+);
+
+handler.all(["/control/alias", "/control/alias/{*rest}"], (req, res) => {
+  if (req.method !== "GET" && req.method !== "POST" && req.method !== "PUT") {
+    return res.status(405).type("text/plain").send(`Unsupported method ${req.method}\n`);
+  }
+  return res.status(400).type("text/plain").send("Usage: /control/alias/<session_identifier>/<alias_name>\n");
 });
 
 // Round-robin active sessions
@@ -498,6 +575,14 @@ handler.get(["/a/:name", "/s/:name"], (req, res) => {
   if (!name) {
     return res.redirect(`/${mode}/${generateSessionName()}`);
   }
+  const aliasedSessionId = sessionAliases.get(name);
+  if (aliasedSessionId) {
+    const aliasedSession = sessions.get(aliasedSessionId);
+    if (aliasedSession && !aliasedSession.cleanedUp && !aliasedSession.exited) {
+      const search = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+      return res.redirect(`/${aliasedSession.mode}/${encodeURIComponent(aliasedSession.name)}${search}`);
+    }
+  }
   if (cleanedSessions.has(name)) {
     return res.status(410).type("text/plain").send(`Session "${name}" has been cleaned up\n`);
   }
@@ -538,9 +623,9 @@ ws.use((socket, next) => {
   if (cleanedSessions.has(sessionName)) {
     return next(new Error(`Session "${sessionName}" has been cleaned up`));
   }
-  const existingSession = sessions.get(sessionName);
+  const existingSession = resolveSession(sessionName);
   if (existingSession && existingSession.mode !== sessionMode) {
-    return next(new Error(`Session "${sessionName}" is running in /${existingSession.mode} mode`));
+    return next(new Error(`Session "${existingSession.name}" is running in /${existingSession.mode} mode`));
   }
   next();
 });

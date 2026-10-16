@@ -20,11 +20,10 @@ A containerized full permission Antigravity CLI, accessible through web browser.
 - **Bidirectional File Management**:
   - **Streaming Downloads** (`/control/download`): Downloads single files or dynamically archives whole directories as `.tar.gz`. Displays original file permissions, ownership, and copyable `chmod`/`chown` restore commands.
   - **Atomic Chunked Uploads** (`/control/upload`): Web UI supporting multi-file selection, folder drag-and-drop, inline renaming, overwrite conflict checks, and atomic temp-file rename on completion.
-- **In-Browser Text File Viewer** (`/control/viewer`):
 
 ---
 
-## Architecture & Security Model
+## Security Model
 
 1. **Reverse Proxy Assumption**:
    - The service is designed to be hosted behind an authenticating reverse proxy (such as Nginx with auth_request module, or Cloudflare with signin protection) that terminates TLS (HTTPS/WSS) and handles user authentication.
@@ -154,9 +153,10 @@ docker compose up -d
 | `/a` or `/s` | Redirects to a new Antigravity (`/a`) or Shell (`/s`) session. |
 | `/a/:name` | Attach to the exisiting or create a new `agy` CLI session.  |
 | `/s/:name` | Attach to the exisiting or create a new shell session. |
-| `/control/list` | Returns JSON list of active terminal sessions (PID, clients, uptime). |
-| `/rr` or `/control/roundrobin` | Redirects to the next active session in round-robin order using client cookies. |
+| `/control/list` | Returns JSON list of active terminal sessions (PID, clients, uptime, aliases). |
+| `/control/alias/:id/:alias` | Binds `<alias>` to the session identified by `<id>` (session name or existing alias). |
+| `/rr` or `/control/roundrobin` | Redirects to the next active session in round-robin order. |
 | `/control/abort/:name` | Kills the session's PTY process tree and terminates the session. |
-| `/control/download/{abs,rel}/<path>` | Downloads file or streams dynamic `.tar.gz` of the specified path. Append `?raw` for direct stream, `?download=0` for plain text. |
+| `/control/download/:mode/{*path}` | Downloads file or streams dynamic `.tar.gz` of the specified path. Append `?raw` for direct stream, `?download=0` for plain text. |
 | `/control/upload` | `GET` serves upload page; `PUT` streams file upload with atomic rename. |
-| `/control/viewer/{abs,rel}/<path>` | In-browser text viewer for text file at the specified path, append `?line=<line number or range>` for highlighting. |
+| `/control/viewer/:mode/{*path}` | In-browser text viewer for text file at the specified path, append `?line=<line number or range>` for highlighting. |
