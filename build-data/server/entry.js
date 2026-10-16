@@ -13,10 +13,6 @@ const { createDownloadRouter } = require("./download");
 const { createViewerRouter } = require("./viewer");
 const { isPrefetchOrPrerender, noCache } = require("./util");
 
-// TODO: voice input
-// TODO: overlay
-// TODO: mobile adapt
-
 // =======================================================
 //                    Global Constants
 // =======================================================
@@ -42,18 +38,18 @@ const ENV = {
 };
 
 const ROUTING_TABLE = {
-  "/static/main.js": "client/main.js",
-  "/static/upload.js": "client/upload.js",
-  "/static/download.js": "client/download.js",
-  "/static/viewer.js": "client/viewer.js",
-  "/static/xterm.js": "node_modules/@xterm/xterm/lib/xterm.js",
+  "/static/main.js":            "client/main.js",
+  "/static/upload.js":          "client/upload.js",
+  "/static/download.js":        "client/download.js",
+  "/static/viewer.js":          "client/viewer.js",
+  "/static/xterm.js":           "node_modules/@xterm/xterm/lib/xterm.js",
   "/static/xterm-clipboard.js": "node_modules/@xterm/addon-clipboard/lib/addon-clipboard.js",
-  "/static/xterm-fit.js": "node_modules/@xterm/addon-fit/lib/addon-fit.js",
-  "/static/xterm-weblinks.js": "node_modules/@xterm/addon-web-links/lib/addon-web-links.js",
-  "/static/xterm-image.js": "node_modules/@xterm/addon-image/lib/addon-image.js",
-  "/static/xterm-progress.js": "node_modules/@xterm/addon-progress/lib/addon-progress.js",
-  "/static/xterm-search.js": "node_modules/@xterm/addon-search/lib/addon-search.js",
-  "/static/xterm.css": "node_modules/@xterm/xterm/css/xterm.css",
+  "/static/xterm-fit.js":       "node_modules/@xterm/addon-fit/lib/addon-fit.js",
+  "/static/xterm-weblinks.js":  "node_modules/@xterm/addon-web-links/lib/addon-web-links.js",
+  "/static/xterm-image.js":     "node_modules/@xterm/addon-image/lib/addon-image.js",
+  "/static/xterm-progress.js":  "node_modules/@xterm/addon-progress/lib/addon-progress.js",
+  "/static/xterm-search.js":    "node_modules/@xterm/addon-search/lib/addon-search.js",
+  "/static/xterm.css":          "node_modules/@xterm/xterm/css/xterm.css",
 };
 
 // =======================================================
@@ -132,6 +128,7 @@ function killProcessTree(pid) {
   }, 1000).unref();
 }
 
+// TODO: move to utility
 function findBufferCutIndex(buffer, maxLength) {
   const rawCutIndex = buffer.length - maxLength;
 
