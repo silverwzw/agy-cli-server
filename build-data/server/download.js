@@ -7,17 +7,49 @@ const { isPrefetchOrPrerender, noCache, getUserAndGroup, formatBytes } = require
 
 const CLI_UA_KEYWORDS = ["curl", "wget", "aria", "axel", "httpie", "fetch/"];
 
+const SAFE_FILENAME_RE = /^[a-zA-Z0-9_.][a-zA-Z0-9_.-]*$/;
+const SAFE_PRINCIPAL_RE = /^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/;
+const CHMOD_UNAVAILABLE_MSG = "Unable to display chmod command (unsupported characters)";
+const CHOWN_UNAVAILABLE_MSG = "Unable to display chown command (unsupported characters)";
+
+function isSafeFilename(name) {
+  return typeof name === "string" && name !== "." && name !== ".." && SAFE_FILENAME_RE.test(name);
+}
+
+function isSafePrincipal(name) {
+  return typeof name === "string" && SAFE_PRINCIPAL_RE.test(name);
+}
+
 function getDownloadHtml(targetFile, stat, rawUrl, template) {
   const isDirectory = stat.isDirectory();
   const baseName = path.basename(targetFile);
   const filename = isDirectory ? `${baseName}.tar.gz` : baseName;
-  const safeName = /^[a-zA-Z0-9_\-\.]+$/.test(filename) ? filename : JSON.stringify(filename);
   const modeOctal = (stat.mode & 0o7777).toString(8);
   const { userName, groupName, uid, gid } = getUserAndGroup(stat.uid, stat.gid);
 
-  const chmodCmd = isDirectory ? "" : `chmod ${modeOctal} ${safeName}`;
-  const chownNameCmd = isDirectory ? "" : `chown ${userName}:${groupName} ${safeName}`;
-  const chownIdCmd = isDirectory ? "" : `chown ${uid}:${gid} ${safeName}`;
+  const safeFilename = !isDirectory && isSafeFilename(filename);
+  const safePrincipal = isSafePrincipal(userName) && isSafePrincipal(groupName);
+  const safeIds = Number.isInteger(uid) && uid >= 0 && Number.isInteger(gid) && gid >= 0;
+
+  const canShowChmod = !isDirectory && safeFilename;
+  const canShowChownName = !isDirectory && safeFilename && safePrincipal;
+  const canShowChownId = !isDirectory && safeFilename && safeIds;
+
+  const chmodCmd = isDirectory
+    ? ""
+    : canShowChmod
+      ? `chmod ${modeOctal} ${filename}`
+      : CHMOD_UNAVAILABLE_MSG;
+  const chownNameCmd = isDirectory
+    ? ""
+    : canShowChownName
+      ? `chown ${userName}:${groupName} ${filename}`
+      : CHOWN_UNAVAILABLE_MSG;
+  const chownIdCmd = isDirectory
+    ? ""
+    : canShowChownId
+      ? `chown ${uid}:${gid} ${filename}`
+      : CHOWN_UNAVAILABLE_MSG;
   const commandsStyle = isDirectory ? "display: none;" : "";
 
   const cleanUrl = rawUrl.split("?")[0];
@@ -38,8 +70,14 @@ function getDownloadHtml(targetFile, stat, rawUrl, template) {
     DIRECT_DOWNLOAD_URL: escapeHtml(directDownloadUrl),
     COMMANDS_STYLE: commandsStyle,
     CHMOD_CMD: escapeHtml(chmodCmd),
+    CHMOD_CLASS: canShowChmod ? "" : "unavailable",
+    CHMOD_COPY_ATTR: canShowChmod ? "" : "disabled hidden",
     CHOWN_NAME_CMD: escapeHtml(chownNameCmd),
+    CHOWN_NAME_CLASS: canShowChownName ? "" : "unavailable",
+    CHOWN_NAME_COPY_ATTR: canShowChownName ? "" : "disabled hidden",
     CHOWN_ID_CMD: escapeHtml(chownIdCmd),
+    CHOWN_ID_CLASS: canShowChownId ? "" : "unavailable",
+    CHOWN_ID_COPY_ATTR: canShowChownId ? "" : "disabled hidden",
   };
 
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => replacements[key] ?? "");
@@ -60,7 +98,7 @@ function streamDirectoryArchive(req, res, targetDir) {
     `attachment; filename="${encodeURIComponent(archiveName)}"; filename*=UTF-8''${encodeURIComponent(archiveName)}`
   );
 
-  const tarProcess = spawn("tar", ["-czf", "-", "-C", parentDir, baseName]);
+  const tarProcess = spawn("tar", ["-czf", "-", "-C", parentDir, "--", baseName]);
 
   tarProcess.stdout.pipe(res, { end: false });
 

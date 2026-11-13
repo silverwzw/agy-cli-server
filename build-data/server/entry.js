@@ -27,7 +27,10 @@ const AGY_BIN = "/root/.local/bin/agy";
 const AGY_ARGS = ["--dangerously-skip-permissions", "--remote-control"];
 
 const MAX_ALIGNMENT_SEARCH_WINDOW = 4096;
+const MAX_PTY_COLS = 1000;
+const MAX_PTY_ROWS = 1000;
 const RR_COOKIE_NAME = "rr_session";
+const SENSITIVE_HEADER_SUBSTRINGS = ["auth", "token", "secret", "key", "access", "cred", "pass"];
 
 const ENV = {
   ...process.env,
@@ -56,6 +59,61 @@ const ROUTING_TABLE = {
 //                     HTTP & WS Setup
 // =======================================================
 
+function isSameOriginRequest(req) {
+  const secFetchSite = String(req?.headers?.["sec-fetch-site"] || "").toLowerCase();
+  if (secFetchSite && secFetchSite !== "same-origin" && secFetchSite !== "none") {
+    return false;
+  }
+
+  const origin = req?.headers?.origin;
+  if (!origin) {
+    // Browsers always send Origin on WebSocket upgrades and cross-origin requests,
+    // whereas same-origin GET polling requests may omit Origin.
+    const isWsUpgrade = String(req?.headers?.upgrade || "").toLowerCase() === "websocket";
+    return !isWsUpgrade;
+  }
+
+  let parsedOrigin;
+  try {
+    parsedOrigin = new URL(origin);
+  } catch (_) {
+    return false;
+  }
+  if (parsedOrigin.protocol !== "http:" && parsedOrigin.protocol !== "https:") {
+    return false;
+  }
+
+  const rawHost = req.headers?.["x-forwarded-host"] || req.headers?.host;
+  if (!rawHost || typeof rawHost !== "string") {
+    return false;
+  }
+  const requestHost = rawHost.split(",")[0].trim().toLowerCase();
+  if (!requestHost) {
+    return false;
+  }
+
+  const forwardedProto = String(req.headers?.["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+  if (forwardedProto && forwardedProto !== "http" && forwardedProto !== "https") {
+    return false;
+  }
+  if (forwardedProto && parsedOrigin.protocol !== `${forwardedProto}:`) {
+    return false;
+  }
+
+  const compareProto = forwardedProto ? `${forwardedProto}:` : parsedOrigin.protocol;
+  let expectedUrl;
+  try {
+    expectedUrl = new URL(`${compareProto}//${requestHost}`);
+  } catch (_) {
+    return false;
+  }
+
+  return parsedOrigin.origin === expectedUrl.origin;
+}
+
 const handler = express();
 handler.set("trust proxy", true);
 handler.use(cookieParser());
@@ -64,6 +122,9 @@ const server = http.createServer(handler);
 const ws = socket(server, {
   pingInterval: 25000,
   pingTimeout: 20000,
+  allowRequest: (req, callback) => {
+    callback(null, isSameOriginRequest(req));
+  },
 });
 
 // =======================================================
@@ -260,6 +321,9 @@ class Session {
   }
 
   write(data) {
+    if (typeof data !== "string") {
+      return;
+    }
     if (this.ptyProcess && !this.exited) {
       try {
         this.ptyProcess.write(data);
@@ -272,7 +336,14 @@ class Session {
   resize(cols, rows) {
     const c = parseInt(cols, 10);
     const r = parseInt(rows, 10);
-    if (this.ptyProcess && !this.exited && c > 0 && r > 0) {
+    if (
+      this.ptyProcess &&
+      !this.exited &&
+      c > 0 &&
+      r > 0 &&
+      c <= MAX_PTY_COLS &&
+      r <= MAX_PTY_ROWS
+    ) {
       try {
         this.ptyProcess.resize(c, r);
       } catch (err) {
@@ -367,6 +438,12 @@ handler.use((req, res, next) => {
     const userIp = extractRequestIp(req);
     const headers = { ...req.headers };
     delete headers.cookie;
+    for (const key of Object.keys(headers)) {
+      const lowerKey = key.toLowerCase();
+      if (SENSITIVE_HEADER_SUBSTRINGS.some((sub) => lowerKey.includes(sub))) {
+        headers[key] = "[REDACTED]";
+      }
+    }
     console.log(`[${time}] HTTP ${req.method} ${requestUrl} from IP ${userIp} | Headers:`, headers);
   } catch (err) {
     console.error("Error logging HTTP request:", err);
@@ -475,6 +552,10 @@ handler.all(
 
     if (sessions.has(alias)) {
       return res.status(409).type("text/plain").send(`Alias "${alias}" conflicts with active session "${alias}"\n`);
+    }
+
+    if (cleanedSessions.has(alias)) {
+      return res.status(409).type("text/plain").send(`Alias "${alias}" conflicts with cleaned up session "${alias}"\n`);
     }
 
     const existingOwner = sessionAliases.get(alias);
@@ -611,6 +692,10 @@ handler.use((err, req, res, next) => {
 // =======================================================
 
 ws.use((socket, next) => {
+  if (!isSameOriginRequest(socket.request)) {
+    return next(new Error("Cross-origin socket connections are not allowed"));
+  }
+
   const sessionName = String(socket.handshake.query?.name || "").trim();
   const sessionMode = socket.handshake.query?.mode;
 
@@ -655,11 +740,17 @@ ws.on("connection", (socket) => {
   socket.join(`session:${session.name}`);
 
   socket.on("t.c2s", (data) => {
+    if (typeof data !== "string") {
+      return;
+    }
     session.write(data);
   });
 
-  socket.on("t.resize", ({ cols, rows } = {}) => {
-    session.resize(cols, rows);
+  socket.on("t.resize", (payload) => {
+    if (!payload || typeof payload !== "object") {
+      return;
+    }
+    session.resize(payload.cols, payload.rows);
   });
 
   socket.on("disconnect", () => {

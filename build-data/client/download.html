@@ -176,6 +176,10 @@
       overflow-x: auto;
       white-space: nowrap;
     }
+    .command-code.unavailable {
+      color: #94a3b8;
+      font-style: italic;
+    }
     .btn-copy {
       background: #1e293b;
       border: none;
@@ -187,6 +191,9 @@
       cursor: pointer;
       transition: all 0.2s;
       white-space: nowrap;
+    }
+    .btn-copy:disabled {
+      display: none;
     }
     .btn-copy:hover {
       background: #334155;
@@ -248,8 +255,8 @@
           <span>1. Permissions (chmod)</span>
         </div>
         <div class="command-box">
-          <code class="command-code" id="cmd-chmod">{{CHMOD_CMD}}</code>
-          <button class="btn-copy" onclick="copyFromElement('cmd-chmod', this)">Copy</button>
+          <code class="command-code {{CHMOD_CLASS}}" id="cmd-chmod">{{CHMOD_CMD}}</code>
+          <button class="btn-copy" onclick="copyFromElement('cmd-chmod', this)" {{CHMOD_COPY_ATTR}}>Copy</button>
         </div>
       </div>
 
@@ -258,8 +265,8 @@
           <span>2. Ownership — Username & Group Name Version</span>
         </div>
         <div class="command-box">
-          <code class="command-code" id="cmd-chown-name">{{CHOWN_NAME_CMD}}</code>
-          <button class="btn-copy" onclick="copyFromElement('cmd-chown-name', this)">Copy</button>
+          <code class="command-code {{CHOWN_NAME_CLASS}}" id="cmd-chown-name">{{CHOWN_NAME_CMD}}</code>
+          <button class="btn-copy" onclick="copyFromElement('cmd-chown-name', this)" {{CHOWN_NAME_COPY_ATTR}}>Copy</button>
         </div>
       </div>
 
@@ -268,8 +275,8 @@
           <span>3. Ownership — UID & GID Version</span>
         </div>
         <div class="command-box">
-          <code class="command-code" id="cmd-chown-id">{{CHOWN_ID_CMD}}</code>
-          <button class="btn-copy" onclick="copyFromElement('cmd-chown-id', this)">Copy</button>
+          <code class="command-code {{CHOWN_ID_CLASS}}" id="cmd-chown-id">{{CHOWN_ID_CMD}}</code>
+          <button class="btn-copy" onclick="copyFromElement('cmd-chown-id', this)" {{CHOWN_ID_COPY_ATTR}}>Copy</button>
         </div>
       </div>
     </div>

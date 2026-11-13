@@ -1,6 +1,6 @@
-function copyFromElement(id) {
+function copyFromElement(id, btn) {
   const el = document.getElementById(id);
-  if (!el || !navigator.clipboard?.writeText) return;
+  if (!el || btn?.disabled || el.classList.contains("unavailable") || !navigator.clipboard?.writeText) return;
 
   navigator.clipboard.writeText(el.innerText);
 }
