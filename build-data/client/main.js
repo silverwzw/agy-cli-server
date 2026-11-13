@@ -185,20 +185,61 @@ function initSocket() {
   // == Socket <-> xTerm ==
   //
 
+  let isReplaying = false;
+  // Monotonic generation token to invalidate stale async term.write() replay callbacks
+  // when a new replay starts, the socket disconnects, or the session is aborted.
+  let replayToken = 0;
+  let pendingS2c = [];
+  let isAborted = false;
+
+  function syncTerminalSize() {
+    addon_fit.fit();
+    if (!isAborted) {
+      socket.emit("t.resize", { cols: term.cols, rows: term.rows });
+    }
+  }
+
   socket.on("t.replay", (data) => {
+    // Advance the replay token so any earlier in-flight term.write() callback becomes a no-op.
+    const token = ++replayToken;
+    isReplaying = true;
+    term.options.disableStdin = true;
     term.reset();
-    term.write(data);
+
+    const replayText = typeof data === "string" ? data : "";
+    term.write(replayText, () => {
+      // Ignore stale callback if superseded by another replay, disconnect, or session abort.
+      if (token !== replayToken) return;
+
+      isReplaying = false;
+      if (!isAborted) {
+        term.options.disableStdin = false;
+      }
+      if (pendingS2c.length > 0) {
+        const queued = pendingS2c.join("");
+        pendingS2c = [];
+        term.write(queued);
+      }
+      syncTerminalSize();
+    });
   });
 
   socket.on("t.s2c", (data) => {
+    if (isReplaying) {
+      pendingS2c.push(data);
+      return;
+    }
     term.write(data);
   });
 
   const onDataHandler = term.onData((data) => {
+    // Suppress terminal query responses (e.g. DSR/DA/OSC/DECRQM) emitted while replaying history.
+    if (isReplaying || isAborted) return;
     socket.emit("t.c2s", data);
   });
 
   const onResizeHandler = term.onResize((size) => {
+    if (isReplaying || isAborted) return;
     socket.emit("t.resize", size);
   });
 
@@ -207,17 +248,32 @@ function initSocket() {
   // == Session Management ==
   //
 
-  let isAborted = false;
+  socket.on("s.joinSuccess", ({ hasReplay } = {}) => {
+    if (hasReplay) {
+      // Hold live t.s2c output and initial t.resize until t.replay completes.
+      isReplaying = true;
+      pendingS2c = [];
+    } else {
+      syncTerminalSize();
+    }
+  });
 
-  socket.on("s.joinSuccess", () => {
-    addon_fit.fit();
+  socket.on("disconnect", () => {
+    // Invalidate any pending replay callback so it cannot mutate state after disconnect.
+    replayToken++;
+    isReplaying = false;
+    pendingS2c = [];
     if (!isAborted) {
-      socket.emit("t.resize", { cols: term.cols, rows: term.rows });
+      term.options.disableStdin = false;
     }
   });
 
   socket.on("s.aborted", () => {
     isAborted = true;
+    // Invalidate any pending replay callback before tearing down the session.
+    replayToken++;
+    isReplaying = false;
+    pendingS2c = [];
     term.options.disableStdin = true;
     onDataHandler.dispose();
     onResizeHandler.dispose();

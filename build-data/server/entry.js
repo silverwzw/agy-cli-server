@@ -636,13 +636,23 @@ ws.on("connection", (socket) => {
     return;
   }
 
-  socket.join(`session:${session.name}`);
-  session.clients.add(socket.id);
-  socket.emit("s.joinSuccess", { name: session.name, mode: session.mode });
+  const replayData = session.buffer;
+  const hasReplay = replayData.length > 0;
 
-  if (session.buffer.length > 0) {
-    socket.emit("t.replay", session.buffer);
+  session.clients.add(socket.id);
+  socket.emit("s.joinSuccess", {
+    name: session.name,
+    mode: session.mode,
+    hasReplay,
+  });
+
+  if (hasReplay) {
+    socket.emit("t.replay", replayData);
   }
+
+  // Join the live broadcast room after queueing the initial replay snapshot
+  // so live t.s2c chunks cannot arrive ahead of t.replay.
+  socket.join(`session:${session.name}`);
 
   socket.on("t.c2s", (data) => {
     session.write(data);
