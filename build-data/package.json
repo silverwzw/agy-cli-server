@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "@vlasky/shacrypt": "0.6.0",
     "@xterm/addon-clipboard": "^0.2.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-image": "^0.9.0",
@@ -13,6 +14,12 @@
     "node-pty": "^1.1.0",
     "posix": "^4.2.0",
     "socket.io": "^4.8.3"
+  },
+  "overrides": {
+    "@vlasky/shacrypt": {
+      "node-addon-api": "8.9.2",
+      "node-gyp-build": "4.8.4"
+    }
   },
   "scripts": {
     "start": "node server/entry.js"

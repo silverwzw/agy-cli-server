@@ -25,12 +25,49 @@ A containerized full permission Antigravity CLI, accessible through web browser.
 
 ## Security Model
 
-1. **Reverse Proxy Assumption**:
-   - The service is designed to be hosted behind an authenticating reverse proxy (such as Nginx with auth_request module, or Cloudflare with signin protection) that terminates TLS (HTTPS/WSS) and handles user authentication.
-   - The application does not implement internal authentication or TLS encryption.
+1. **Reverse Proxy & Authentication**:
+   - The service can be hosted behind an authenticating reverse proxy (such as Nginx with `auth_request` module, or Cloudflare Access) that terminates TLS (HTTPS/WSS) and handles user authentication.
+   - Alternatively, you can enable built-in **HTTP Basic Authentication** via the `HTTP_BASIC_AUTH` environment variable (recommended to still terminate TLS via a reverse proxy over untrusted networks).
+   - If `HTTP_BASIC_AUTH` is unset or empty, built-in authentication is disabled.
 2. **Super Administrator Privileges**:
-   - Any client that reaches the application through the reverse proxy is treated as a super administrator.
+   - Any authenticated client reaching the application is treated as a super administrator.
    - Root terminal execution, reading system files, and creating or overwriting files are intended administrative features.
+
+### Optional HTTP Basic Authentication (`HTTP_BASIC_AUTH`)
+
+Set the `HTTP_BASIC_AUTH` environment variable to `<username>:<sha256-crypt-hash>` (using standard SHA-256 crypt `$5$...` hashes) to protect all HTTP routes and Socket.IO/WebSocket connections:
+
+1. **Generate a credential** (prompts for password without echoing to terminal/history):
+
+   On Linux with OpenSSL:
+   ```bash
+   printf 'alice:%s\n' "$(openssl passwd -5)"
+   ```
+
+   Or cross-platform (including macOS/Windows) using the container image:
+   ```bash
+   docker run --rm -it silverwzw/agy-cli-server:latest sh -c 'printf "alice:%s\n" "$(openssl passwd -5)"'
+   ```
+
+   *(Optional)* Specify higher rounds (e.g. `50000`) with a random salt:
+   ```bash
+   printf 'alice:%s\n' "$(openssl passwd -5 -salt "rounds=50000\$$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9./' | head -c 16)")"
+   ```
+
+2. **Pass into the container**:
+   - **Docker CLI** (use single quotes so `$` is not expanded by your shell):
+     ```bash
+     -e HTTP_BASIC_AUTH='alice:$5$...'
+     ```
+   - **Docker Compose** (escape every `$` as `$$` in `docker-compose.yaml` to prevent Compose variable interpolation):
+     ```yaml
+     environment:
+       - HTTP_BASIC_AUTH=alice:$$5$$...
+     ```
+
+> **Notes**:
+> - If `HTTP_BASIC_AUTH` is set to a malformed value (missing `:`, empty username/hash, or non-`$5$` hash), the server refuses to start.
+> - Do not enable `HTTP_BASIC_AUTH` together with an upstream reverse proxy that injects its own `Authorization` header (browsers send only one `Authorization` header per origin).
 
 ---
 

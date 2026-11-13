@@ -12,6 +12,19 @@ const { createUploadRouter } = require("./upload");
 const { createDownloadRouter } = require("./download");
 const { createViewerRouter } = require("./viewer");
 const { isPrefetchOrPrerender, noCache } = require("./util");
+const { parseBasicAuthEnv, createBasicAuthVerifier, createBasicAuthMiddleware } = require("./auth");
+
+let basicAuthConfig = null;
+try {
+  basicAuthConfig = parseBasicAuthEnv(process.env.HTTP_BASIC_AUTH);
+} catch (err) {
+  console.error(`Fatal configuration error: ${err.message}`);
+  process.exit(1);
+} finally {
+  // Strip credentials from process.env before constructing ENV so PTY child processes never inherit them.
+  delete process.env.HTTP_BASIC_AUTH;
+}
+const basicAuthVerifier = createBasicAuthVerifier(basicAuthConfig);
 
 // =======================================================
 //                    Global Constants
@@ -123,7 +136,16 @@ const ws = socket(server, {
   pingInterval: 25000,
   pingTimeout: 20000,
   allowRequest: (req, callback) => {
-    callback(null, isSameOriginRequest(req));
+    if (!isSameOriginRequest(req)) {
+      return callback(null, false);
+    }
+    if (!basicAuthVerifier) {
+      return callback(null, true);
+    }
+    basicAuthVerifier
+      .verifyHeader(req.headers?.authorization)
+      .then((ok) => callback(null, ok))
+      .catch(() => callback(null, false));
   },
 });
 
@@ -467,6 +489,11 @@ handler.use((req, res, next) => {
   }
 });
 
+// Optional HTTP Basic Auth guard across all HTTP routes
+if (basicAuthVerifier) {
+  handler.use(createBasicAuthMiddleware(basicAuthVerifier));
+}
+
 // Static routes
 for (const [request_path, resource_path] of Object.entries(ROUTING_TABLE)) {
   const filePath = path.join(ROOT_DIR, resource_path);
@@ -691,9 +718,15 @@ handler.use((err, req, res, next) => {
 //                   WebSocket Setup
 // =======================================================
 
-ws.use((socket, next) => {
+ws.use(async (socket, next) => {
   if (!isSameOriginRequest(socket.request)) {
     return next(new Error("Cross-origin socket connections are not allowed"));
+  }
+  if (basicAuthVerifier) {
+    const ok = await basicAuthVerifier.verifyHeader(socket.request?.headers?.authorization).catch(() => false);
+    if (!ok) {
+      return next(new Error("Unauthorized"));
+    }
   }
 
   const sessionName = String(socket.handshake.query?.name || "").trim();
@@ -766,6 +799,10 @@ process.on("unhandledRejection", (reason, promise) => {
   console.error("Unhandled Rejection at:", promise, "reason:", reason);
 });
 
-server.listen(8443, () => console.log("listening on http://0.0.0.0:8443"));
+server.listen(8443, () => {
+  console.log(
+    `listening on http://0.0.0.0:8443 (HTTP Basic Auth: ${basicAuthVerifier ? "enabled" : "disabled"})`
+  );
+});
 
 // vim: set nu list listchars=trail\:· sw=4 ts=4 expandtab:
