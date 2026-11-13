@@ -426,4 +426,239 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
+// =======================================================
+//          Silent Drag-and-Drop Background Upload
+// =======================================================
+
+const DROP_UPLOAD_DIR = "/agy";
+const MAX_DROP_UPLOAD_FILES = 100;
+const MAX_DROP_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
+
+let dropUploadQueue = Promise.resolve();
+
+function hasDraggedFiles(dataTransfer) {
+  if (!dataTransfer) return false;
+  if (dataTransfer.types) {
+    for (let i = 0; i < dataTransfer.types.length; i++) {
+      if (dataTransfer.types[i] === "Files") {
+        return true;
+      }
+    }
+  }
+  return Boolean(dataTransfer.files && dataTransfer.files.length > 0);
+}
+
+function normalizeDropRelativePath(rawPath) {
+  return String(rawPath || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((seg) => seg && seg !== "." && seg !== "..")
+    .join("/");
+}
+
+function getFileFromEntry(fileEntry, relativePath) {
+  return new Promise((resolve, reject) => {
+    fileEntry.file((file) => {
+      if (relativePath) {
+        file.relativePath = relativePath;
+      }
+      resolve(file);
+    }, reject);
+  });
+}
+
+async function readAllDirectoryEntries(dirReader) {
+  const entries = [];
+  let batch;
+  do {
+    batch = await new Promise((resolve, reject) => {
+      dirReader.readEntries(resolve, reject);
+    });
+    if (batch && batch.length > 0) {
+      entries.push(...batch);
+    }
+  } while (batch && batch.length > 0);
+  return entries;
+}
+
+async function traverseDropEntry(entry, currentPath, state) {
+  if (state.limitReason) return;
+
+  const entryPath = currentPath ? `${currentPath}/${entry.name}` : entry.name;
+  if (entry.isFile) {
+    try {
+      const file = await getFileFromEntry(entry, currentPath ? entryPath : "");
+      if (state.limitReason) return;
+
+      if (state.files.length >= MAX_DROP_UPLOAD_FILES) {
+        state.limitReason = `Drop upload skipped: file count exceeds limit of ${MAX_DROP_UPLOAD_FILES}`;
+        return;
+      }
+      if (state.totalBytes + file.size > MAX_DROP_UPLOAD_BYTES) {
+        state.limitReason = "Drop upload skipped: total size exceeds limit of 100 MB";
+        return;
+      }
+
+      state.files.push(file);
+      state.totalBytes += file.size;
+    } catch (err) {
+      console.warn("Failed to read dropped file entry:", entry.name, err);
+    }
+    return;
+  }
+
+  if (entry.isDirectory) {
+    try {
+      const dirReader = entry.createReader();
+      const subEntries = await readAllDirectoryEntries(dirReader);
+      for (const subEntry of subEntries) {
+        if (state.limitReason) break;
+        await traverseDropEntry(subEntry, entryPath, state);
+      }
+    } catch (err) {
+      console.warn("Failed to read dropped directory entry:", entry.name, err);
+    }
+  }
+}
+
+function captureDropPayload(dataTransfer) {
+  const entries = [];
+  const items = dataTransfer?.items;
+  if (items && items.length > 0 && typeof items[0].webkitGetAsEntry === "function") {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === "file") {
+        const entry = item.webkitGetAsEntry();
+        if (entry) {
+          entries.push(entry);
+        }
+      }
+    }
+  }
+  const fallbackFiles = Array.from(dataTransfer?.files || []);
+  return { entries, fallbackFiles };
+}
+
+async function resolveDroppedFiles(payload) {
+  const state = { files: [], totalBytes: 0, limitReason: "" };
+
+  if (payload.entries.length > 0) {
+    for (const entry of payload.entries) {
+      if (state.limitReason) break;
+      await traverseDropEntry(entry, "", state);
+    }
+  } else {
+    for (const file of payload.fallbackFiles) {
+      if (state.files.length >= MAX_DROP_UPLOAD_FILES) {
+        state.limitReason = `Drop upload skipped: file count exceeds limit of ${MAX_DROP_UPLOAD_FILES}`;
+        break;
+      }
+      if (state.totalBytes + file.size > MAX_DROP_UPLOAD_BYTES) {
+        state.limitReason = "Drop upload skipped: total size exceeds limit of 100 MB";
+        break;
+      }
+      state.files.push(file);
+      state.totalBytes += file.size;
+    }
+  }
+
+  return state;
+}
+
+function uploadDroppedFile(file, targetPath) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const url = `/control/upload?path=${encodeURIComponent(targetPath)}&autorename=1`;
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("X-File-Path", encodeURI(targetPath));
+    const targetFilename = targetPath.split("/").filter(Boolean).pop() || file.name;
+    xhr.setRequestHeader("X-File-Name", encodeURI(targetFilename));
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch (_) {
+          resolve({ ok: true, path: targetPath });
+        }
+      } else {
+        let msg = `HTTP ${xhr.status}`;
+        try {
+          const errData = JSON.parse(xhr.responseText);
+          if (errData?.error) msg = errData.error;
+        } catch (_) {
+          if (xhr.responseText) msg = xhr.responseText.trim();
+        }
+        reject(new Error(msg));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("Network error during background upload"));
+    xhr.ontimeout = () => reject(new Error("Background upload timed out"));
+    xhr.send(file);
+  });
+}
+
+async function processDropPayload(payload) {
+  const { files, limitReason } = await resolveDroppedFiles(payload);
+  if (limitReason) {
+    console.warn(limitReason);
+    return;
+  }
+  if (files.length === 0) {
+    return;
+  }
+
+  for (const file of files) {
+    const relPath = normalizeDropRelativePath(file.relativePath || file.name);
+    if (!relPath) continue;
+    const targetPath = `${DROP_UPLOAD_DIR}/${relPath}`;
+    try {
+      const result = await uploadDroppedFile(file, targetPath);
+      console.log(`Background upload complete: ${result?.path || targetPath}`);
+    } catch (err) {
+      console.error(`Background upload failed for ${targetPath}:`, err);
+    }
+  }
+}
+
+window.addEventListener(
+  "dragenter",
+  (e) => {
+    if (!hasDraggedFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+  },
+  true
+);
+
+window.addEventListener(
+  "dragover",
+  (e) => {
+    if (!hasDraggedFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = "copy";
+    }
+  },
+  true
+);
+
+window.addEventListener(
+  "drop",
+  (e) => {
+    if (!hasDraggedFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Capture DataTransfer entries synchronously before yielding to async tasks.
+    const payload = captureDropPayload(e.dataTransfer);
+    dropUploadQueue = dropUploadQueue.then(() => processDropPayload(payload)).catch((err) => {
+      console.error("Drop upload error:", err);
+    });
+  },
+  true
+);
+
 // vim: set nu list listchars=trail\:· sw=4 ts=4 expandtab:

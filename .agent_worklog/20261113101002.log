@@ -1,0 +1,882 @@
+================================================================================
+                         ANTIGRAVITY AGENT WORKLOG
+================================================================================
+Date:                   2026-11-13
+Conversation ID:        3a6f176d-c3ac-4b5f-98bb-f2e00241eb94
+Workspace:              /agy & /source (silverwzw/agy-cli-server)
+First Message Time:     2026-11-13T07:41:33Z
+Last Message Time:      2026-11-13T10:09:11Z
+Log Generated Time:     2026-11-13T10:10:02Z
+Total Turns:            14
+Total Trajectory Steps: 288
+================================================================================
+
+--------------------------------------------------------------------------------
+[Turn 1] Timestamp: 2026-11-13T07:41:33Z (Step: 0)
+--------------------------------------------------------------------------------
+
+USER:
+理解并检查/source下的项目，提出代码审计报告，以markdown的形式存档到/agy下
+
+ACTIONS / TOOL CALLS:
+  - [Tool: run_command] `ls -la /agy /source && find /source -maxdepth 4 -not -path '*/.*' -not -path '*/node_mo...` (List workspace and source directory)
+  - [Tool: run_command] `find /source -not -path '*/.git*' -not -path '*/node_modules*' -type f -o -type l | xar...` (List all files and line counts)
+  - [Tool: read_file] /source/AGENTS.md
+  - [Tool: read_file] /source/README.md
+  - [Tool: read_file] /source/Dockerfile
+  - [Tool: read_file] /source/.gitignore
+  - [Tool: read_file] /source/.dockerignore
+  - [Tool: read_file] /source/plan.md
+  - [Tool: read_file] /source/TODO.md
+  - [Tool: read_file] /source/test.sh
+  - [Tool: read_file] /source/build-data/init
+  - [Tool: read_file] /source/build-data/dl
+  - [Tool: read_file] /source/build-data/export-conversation
+  - [Tool: read_file] /source/build-data/settings.json
+  - [Tool: read_file] /source/build-data/package.json
+  - [Tool: read_file] /source/build-data/builder/package.json
+  - [Tool: read_file] /source/data/dev_init
+  - [Tool: read_file] /source/util/progress_bar.js
+  - [Tool: read_file] /source/build-data/server/entry.js
+  - [Tool: read_file] /source/build-data/server/download.js
+  - [Tool: read_file] /source/build-data/server/upload.js
+  - [Tool: read_file] /source/build-data/server/viewer.js
+  - [Tool: read_file] /source/build-data/server/util.js
+  - [Tool: read_file] /source/build-data/client/index.html
+  - [Tool: read_file] /source/build-data/client/main.js
+  - [Tool: read_file] /source/build-data/client/download.html
+  - [Tool: read_file] /source/build-data/client/download.js
+  - [Tool: read_file] /source/build-data/client/upload.html
+  - [Tool: read_file] /source/build-data/client/upload.js
+  - [Tool: read_file] /source/build-data/client/viewer.html
+  - [Tool: read_file] /source/build-data/client/viewer.js
+  - [Tool: run_command] `git -C /source status && git -C /source log -n 20 --oneline --decorate` (Check git status and recent commits)
+  - [Tool: run_command] `git -C /source ls-files && git -C /source log --all --stat -- data/secrets/ && ls -la /...` (Check tracked files and permissions)
+  - [Tool: run_command] `git -C /source ls-files -v data/secrets/agy-token && git -C /source diff --stat && git ...` (Check git tracking of secrets file)
+  - [Tool: run_command] `node -e ' for (const p of ["/source/build-data/package-lock.json", "/source/build-data/...` (Inspect lockfile dependency versions)
+  - [Tool: run_command] `node -v && node -e ' const http = require("http"); const s = http.createServer((req, re...` (Check Node version and req close behavior)
+  - [Tool: run_command] `node -e ' const lock = require("/source/build-data/package-lock.json"); for (const pkg ...` (Check native addon dependencies and log hygiene)
+  - [Tool: write_file] /agy/CODE_AUDIT_REPORT.md
+  - [Tool: edit_file] /agy/CODE_AUDIT_REPORT.md
+  - [Tool: run_command] `ls -la /agy && git -C /source status` (Verify report file and clean source repo)
+
+AGENT:
+已完成对 `/source` 项目（`agy-cli-server`）的全面代码检查与审计，并将完整审计报告存档至 [CODE_AUDIT_REPORT.md](file:///agy/CODE_AUDIT_REPORT.md)。
+
+### 项目架构与审计边界
+- 项目基于 Express 5 + Socket.IO + `node-pty` + `xterm.js` v6 提供容器化 Web 终端（`/a/:name` 启动 `agy`、`/s/:name` 启动 `/bin/bash`）及文件下载（`/control/download`）、原子上传（`/control/upload`）、文本查看（`/control/viewer`）与辅助脚本（[`dl`](file:///source/build-data/dl)、[`export-conversation`](file:///source/build-data/export-conversation)）。
+- 按 [`AGENTS.md`](file:///source/AGENTS.md#L53-L55) 与 [`README.md`](file:///source/README.md#L26-L34) 定义的安全模型，服务运行于已鉴权的反向代理之后，接入端视为拥有 Root 权限的超级管理员；审计重点聚焦于 **跨边界安全风险（CSRF / CSWSH / 注入 / 密钥追踪）、进程崩溃（DoS）、资源泄漏、状态竞态与工程质量问题**。
+
+### 核心发现摘要（详见报告）
+
+#### 高危（4 项）
+1. **跨站 WebSocket 劫持（CSWSH）与 `GET` 型控制接口 CSRF**：[`entry.js`](file:///source/build-data/server/entry.js#L64-L67) 未校验 Socket.IO 握手的 `Origin`，且 [`/control/abort/:name`](file:///source/build-data/server/entry.js#L425-L447) 与 [`/control/alias/:identifier/:alias`](file:///source/build-data/server/entry.js#L450-L501) 允许通过 `GET` 发起状态变更。
+2. **`t.resize(null)` 导致主进程崩溃**：[`entry.js`](file:///source/build-data/server/entry.js#L651-L653) 解构 `({ cols, rows } = {})` 在接收 `null` 时抛出未捕获 `TypeError`，可直接击穿 Node.js 进程。
+3. **下载页复制命令存在 Shell 注入**：[`download.js`](file:///source/build-data/server/download.js#L14-L20) 使用 `JSON.stringify` 生成双引号包裹的 `chmod`/`chown` 命令，文件名中的 `$(...)` 或反引号在粘贴执行时会触发宿主机命令执行。
+4. **Git 追踪敏感文件且忽略 `.dockerignore`**：`git ls-files -v` 显示 `data/secrets/agy-token` 处于 Git 追踪状态（仅本地以 `skip-worktree` 掩盖），且 [`.dockerignore`](file:///source/.dockerignore) 被 [`.gitignore`](file:///source/.gitignore#L2) 的 `.*` 规则排除在版本控制之外。
+
+#### 中危与低危重点（17 项）
+- **服务端资源泄漏与竞态**：[`Session.cleanup`](file:///source/build-data/server/entry.js#L288-L328) 未关闭 PTY 主端句柄或清空 `buffer`；`cleanedSessions` 无限增长并永久锁死自定义会话名；[`spawnPty`](file:///source/build-data/server/entry.js#L213-L252) 失败会残留僵尸会话并挂起 Socket；[`entry.js`](file:///source/build-data/server/entry.js#L368-L370) 日志未脱敏 `authorization` 等认证头。
+- **文件服务缺陷**：[`streamDirectoryArchive`](file:///source/build-data/server/download.js#L63) 调用 `tar` 缺少 `--` 分隔符；[`upload.js`](file:///source/build-data/server/upload.js#L42-L88) 对损坏符号链接的 `existsSync` 判定可绕过防覆盖校验且存在 `statSync` 未捕获异常与 `ENAMETOOLONG` 风险；[`server/viewer.js`](file:///source/build-data/server/viewer.js#L60-L61) 未规范化相对路径中的 `..` 导致前端读取/下载 404。
+- **前端与容器运维**：[`showError`](file:///source/build-data/client/main.js#L20-L35) 在 `connect_error` 时覆写 `#terminal` 导致重连失效；[`linkHandlerActivate`](file:///source/build-data/client/main.js#L80-L85) 未对控制路径做 `..` 规范化；[`build-data/init`](file:///source/build-data/init) 未使用 `exec` 接管 PID 1；[`README.md`](file:///source/README.md#L82) Compose 示例的 `:ro` 挂载与首次登录写入 Token 冲突。
+
+> 完整问题定位、代码片段、影响分析及 P0–P2 分级整改建议均已记录在 [CODE_AUDIT_REPORT.md](file:///agy/CODE_AUDIT_REPORT.md) 中，`/source` 目录未做任何修改。
+
+--------------------------------------------------------------------------------
+[Turn 2] Timestamp: 2026-11-13T07:52:31Z (Step: 58)
+--------------------------------------------------------------------------------
+
+USER:
+在replay buffer的过程中，web终端会显示字符串2RR0;276;0c10;rgb:ffff/ffff/ffff11;rgb:0000/0000/000012;2$y 预计该字符串是replay过程中web段对buffer里的vim控制字符进行回应造成的，请提出修正方案
+
+AGENT:
+你的判断非常准确。`2RR0;276;0c10;rgb:ffff/ffff/ffff11;rgb:0000/0000/000012;2$y` 确实是前端 `xterm.js` 在执行 `t.replay` 时，重新解析了历史缓冲区中 Vim 曾发送过的终端能力查询序列，并将应答通过 `term.onData` 当成用户输入发回给了服务端 PTY。
+
+---
+
+### 一、 字符串拆解与触发链路
+
+1. **回显字符串对应的终端应答序列**（`ESC [` / `ESC ]` 等前缀被 Bash Readline 或当前程序消费后残余的可打印部分）：
+   - `2RR`：光标位置查询（DSR/CPR，如 `\x1b[6n`）的应答 `\x1b[...R`
+   - `0;276;0c`：次级设备属性（DA2，`\x1b[>c`）的应答 `\x1b[>0;276;0c`
+   - `10;rgb:ffff/ffff/ffff`：前景色查询（OSC 10，`\x1b]10;?\x07`）的应答 `\x1b]10;rgb:ffff/ffff/ffff\x1b\\`
+   - `11;rgb:0000/0000/0000`：背景色查询（OSC 11，`\x1b]11;?\x07`）的应答 `\x1b]11;rgb:0000/0000/0000\x1b\\`
+   - `12;2$y`：私有模式状态查询（DECRQM，`\x1b[?12$p`）的应答 `\x1b[?12;2$y`
+
+2. **代码触发链路**：
+   - 服务端 [`entry.js`](file:///source/build-data/server/entry.js#L227-L230) 将 PTY 历史输出（含 Vim 启动时发出的查询控制字符）存入 `session.buffer`，新客户端连接或重连时通过 [`entry.js`](file:///source/build-data/server/entry.js#L643-L645) 发送 `t.replay`。
+   - 前端 [`main.js`](file:///source/build-data/client/main.js#L188-L199) 收到 `t.replay` 后调用 `term.reset(); term.write(data);`。
+   - `xterm.js` 解析这些历史查询序列后会触发 `term.onData`，而 `main.js` 将所有 `onData` 无条件通过 `socket.emit("t.c2s", data)` 写入 PTY `stdin`。若此时正在运行 Vim Normal 模式，这些字符（如 `c`、`$` 等）甚至会被当成编辑指令直接修改打开的文件。
+
+---
+
+### 二、 修正方案
+
+> **关键设计约束**：`xterm.js` 的 `term.write(data)` 是**异步分帧解析**的，不能在 `term.write(data)` 之后同步恢复开关，必须依赖 **`term.write(data, callback)` 的完成回调**；同时需要妥善处理重放期间到达的实时 `t.s2c` 和 `t.resize` 时序，避免两者冲突或丢失实时响应。
+
+#### 1. 客户端改造（核心根治）：[`main.js`](file:///source/build-data/client/main.js#L188-L226)
+
+在 `initSocket()` 中引入 `isReplaying` 状态、重放代次令牌 `replayToken` 以及 `pendingS2c` 缓冲队列：
+
+1. **重放开始时屏蔽 `onData` 回传**：在 `isReplaying === true` 时，`term.onData` 直接 `return` 不发送 `t.c2s`；同时临时设置 `term.options.disableStdin = true` 防止用户在几十毫秒的重放期间误输入导致丢失体感。
+2. **缓冲期间到达的 `t.s2c`**：若 `t.replay` 尚未解析完毕时收到实时 `t.s2c`，先推入 `pendingS2c` 数组，避免实时流插队进入 `WriteBuffer` 被误静音或与 `term.reset()` 冲突。
+3. **重放完成回调中恢复并触发 `t.resize`**：在 `term.write(data, () => { ... })` 回调中解除 `isReplaying`、恢复 `disableStdin`、写入 `pendingS2c` 积压数据，**最后再执行 `addon_fit.fit()` 与 `t.resize`**（同时也顺带消除了 `t.replay` 的 `term.reset()` 覆盖 `t.resize` 重绘输出的历史竞态）。
+4. **断线状态复位**：在 `disconnect` 时清理 `isReplaying`、`pendingS2c` 并递增 `replayToken`，防止半途断线导致状态锁死。
+
+参考修改（[`main.js`](file:///source/build-data/client/main.js#L184-L226)）：
+
+```js
+  //
+  // == Socket <-> xTerm ==
+  //
+
+  let isReplaying = false;
+  let replayToken = 0;
+  let pendingS2c = [];
+  let isAborted = false;
+
+  function syncTerminalSize() {
+    addon_fit.fit();
+    if (!isAborted) {
+      socket.emit("t.resize", { cols: term.cols, rows: term.rows });
+    }
+  }
+
+  socket.on("s.joinSuccess", ({ hasReplay } = {}) => {
+    if (hasReplay) {
+      // Wait for t.replay to finish before allowing t.s2c writes and t.resize
+      isReplaying = true;
+      pendingS2c = [];
+    } else {
+      syncTerminalSize();
+    }
+  });
+
+  socket.on("t.replay", (data) => {
+    const token = ++replayToken;
+    isReplaying = true;
+    term.options.disableStdin = true;
+    term.reset();
+
+    term.write(data, () => {
+      if (token !== replayToken) return;
+      isReplaying = false;
+      if (!isAborted) {
+        term.options.disableStdin = false;
+      }
+      if (pendingS2c.length > 0) {
+        const queued = pendingS2c.join("");
+        pendingS2c = [];
+        term.write(queued);
+      }
+      syncTerminalSize();
+    });
+  });
+
+  socket.on("t.s2c", (data) => {
+    if (isReplaying) {
+      pendingS2c.push(data);
+      return;
+    }
+    term.write(data);
+  });
+
+  const onDataHandler = term.onData((data) => {
+    // Drop terminal query responses emitted while replaying history buffer
+    if (isReplaying || isAborted) return;
+    socket.emit("t.c2s", data);
+  });
+
+  const onResizeHandler = term.onResize((size) => {
+    if (isReplaying || isAborted) return;
+    socket.emit("t.resize", size);
+  });
+
+  socket.on("disconnect", () => {
+    replayToken++;
+    isReplaying = false;
+    pendingS2c = [];
+    if (!isAborted) {
+      term.options.disableStdin = false;
+    }
+  });
+
+  socket.on("s.aborted", () => {
+    isAborted = true;
+    replayToken++;
+    isReplaying = false;
+    pendingS2c = [];
+    term.options.disableStdin = true;
+    onDataHandler.dispose();
+    onResizeHandler.dispose();
+    socket.disconnect();
+  });
+```
+
+#### 2. 服务端时序配合：[`entry.js`](file:///source/build-data/server/entry.js#L639-L646)
+
+调整连接初始化时的事件与加入房间顺序，确保 `t.replay` 严格先于后续 `t.s2c` 广播，并告知客户端是否存在重放数据（`hasReplay`）：
+
+```js
+  const replayData = session.buffer;
+  const hasReplay = replayData.length > 0;
+
+  session.clients.add(socket.id);
+  socket.emit("s.joinSuccess", {
+    name: session.name,
+    mode: session.mode,
+    hasReplay,
+  });
+
+  if (hasReplay) {
+    socket.emit("t.replay", replayData);
+  }
+
+  // Join live broadcast room after queueing initial replay snapshot
+  socket.join(`session:${session.name}`);
+```
+
+#### 3. 为什么不建议仅靠“服务端正则过滤查询序列”？
+- 终端查询序列种类繁多（DSR/CPR、DA1/DA2/DA3、DECRQM、OSC 4/10/11/12/52、XTVERSION、XTGETTCAP 等），且 `node-pty` 的 `data` 事件可能将单个转义序列拆在两个 chunk 中，正则极易漏网或误删正常控制符。
+- 在客户端 `term.write(replayData, cb)` 异步解析期内门控 `onData`，可以从机制上 **100% 阻断所有终端引擎及插件（如 OSC 52）在重放阶段产生的任何协议回写**，对任意 TUI 应用均通用。
+
+---
+
+### 三、 回归验证思路
+1. 在会话中启动一次 `vim` 后退出（或运行 `printf '\e[6n\e[>c\e]10;?\a\e]11;?\a\e[?12$p'` 模拟历史查询序列进入 `session.buffer`）。
+2. 新开浏览器标签页或刷新当前会话触发 `t.replay`：确认终端界面正常恢复历史内容，命令行提示符无 `2RR0;276;0c...` 等残余字符注入。
+3. 在 `vim` 仍处于运行状态时开第二个标签页连接同一会话：确认历史画面完整重放且不会向 `vim` 注入误编辑按键。
+
+--------------------------------------------------------------------------------
+[Turn 3] Timestamp: 2026-11-13T07:57:02Z (Step: 60)
+--------------------------------------------------------------------------------
+
+USER:
+replayToken起到什么作用
+
+AGENT:
+`replayToken` 是一个**单调递增的“代次版本号 / 失效令牌”（Generation / Cancellation Token）**，专门用来解决 `term.write(data, callback)` **异步完成回调的过期竞态问题**。
+
+### 为什么需要它？
+`xterm.js` 的 `term.write(data, callback)` 并不是同步写完的，尤其是重放最多 256KB 的 `session.buffer` 时，底层会分帧异步解析，解析完毕后才触发 `callback`。在这段异步等待窗口期里，WebSocket 连接状态可能已经发生变化；如果**没有** `replayToken`，旧写入的回调稍后才触发，就会错误地覆盖当前新状态。
+
+---
+
+### 具体拦截的 3 类竞态场景
+
+1. **短时间内连续重连触发多次 `t.replay`（最典型）**
+   - 第 1 次连接触发 `t.replay`（`token = 1`），`xterm.js` 正在异步写入这 256KB 数据。
+   - 还未写完时网络闪断并立即重连，收到第 2 次 `t.replay`（`replayToken` 变为 `2`，`isReplaying = true`）。
+   - **没有 `replayToken`**：第 1 次写入先一步完成，它的回调会把全局 `isReplaying` 提前改回 `false`，导致第 2 次重放剩余部分里的 Vim 控制字符重新触发 `onData` 回灌到 PTY，同时把 `pendingS2c` 错乱刷新。
+   - **有 `replayToken`**：第 1 次回调触发时检查 `1 !== 2`，直接 `return` 忽略；只有最新一次（`token === 2`）写完时才能解除屏蔽。
+
+2. **重放尚未完成时连接断开（`disconnect`）**
+   - `disconnect` 会执行 `replayToken++` 使在途重放失效，并清理 `pendingS2c` 与 `isReplaying`。
+   - 之后即便 `xterm.js` 内部写队列终于消化完旧数据并调用旧 `callback`，因 `token !== replayToken` 会直接退出，不会在断线状态或新一轮连接建立前误触发 `syncTerminalSize()` / `t.resize`。
+
+3. **重放过程中会话被终止（`s.aborted`）**
+   - `s.aborted` 同样递增 `replayToken`，保证在途 `term.write` 的回调晚到时不会误操作状态或与终止清理逻辑打架。
+
+---
+
+### 一句话总结
+因为 `xterm.js` 没有提供取消已入队 `term.write` 回调的 API，`replayToken` 用极低的成本实现了**“让过期的异步回调自动作废，只允许当前最新且仍有效的重放任务提交状态切换”**。
+
+--------------------------------------------------------------------------------
+[Turn 4] Timestamp: 2026-11-13T08:00:36Z (Step: 62)
+--------------------------------------------------------------------------------
+
+USER:
+好，执行修复，replay token的地方加上注释
+
+ACTIONS / TOOL CALLS:
+  - [Tool: read_file] /source/build-data/client/main.js (Lines 145-230)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 625-660)
+  - [Tool: edit_file] /source/build-data/client/main.js
+  - [Tool: edit_file] /source/build-data/server/entry.js
+  - [Tool: run_command] `git -C /source diff && rm -rf /tmp/audit-fix-test && mkdir -p /tmp/audit-fix-test/clien...` (Review git diff and syntax check copied files)
+  - [Tool: run_command] `cat << 'EOF' > /tmp/audit-fix-test/test_replay.js const assert = require("assert"); con...` (Run replay behavior tests in temp dir)
+  - [Tool: run_command] `git -C /source status -s` (Check git status in source)
+  - [Tool: read_file] /source/build-data/client/main.js (Lines 184-290)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 635-665)
+
+AGENT:
+已完成修复并添加了英文注释（遵循 [`AGENTS.md`](file:///source/AGENTS.md#L45-L51) 的代码注释规范与测试目录规范）：
+
+### 修改清单
+1. **客户端重放门控与 `replayToken` 防竞态**：[`build-data/client/main.js`](file:///source/build-data/client/main.js#L188-L281)
+   - 引入 `isReplaying`、`pendingS2c` 与单调递增的 [`replayToken`](file:///source/build-data/client/main.js#L191)，并在声明、自增失效（`t.replay` / `disconnect` / `s.aborted`）及回调校对位置添加了说明注释。
+   - 在 `s.joinSuccess` 收到 `hasReplay: true` 至 `t.replay` 的 `term.write(replayText, callback)` 异步解析完成前：
+     - 屏蔽 `term.onData` 与 `term.onResize` 上行，防止终端查询应答回灌至 PTY `t.c2s`；
+     - 临时将 `term.options.disableStdin` 置为 `true`，并将期间到达的实时 `t.s2c` 暂存到 `pendingS2c`；
+     - 回调触发且 `token === replayToken` 时恢复输入、刷新 `pendingS2c` 并执行 [`syncTerminalSize`](file:///source/build-data/client/main.js#L195-L200) 同步尺寸。
+2. **服务端握手与重放时序调整**：[`build-data/server/entry.js`](file:///source/build-data/server/entry.js#L639-L655)
+   - 在 `s.joinSuccess` 中增加 `hasReplay` 字段，先下发 `s.joinSuccess` 与 `t.replay` 快照，再调用 `socket.join(\`session:${session.name}\`)` 接收后续实时 `t.s2c` 广播。
+
+### 验证结果
+- 已将修改后的 [`main.js`](file:///source/build-data/client/main.js) 与 [`entry.js`](file:///source/build-data/server/entry.js) 复制到临时目录执行：
+  - `node --check` 语法校验通过；
+  - 基于 Mock `Terminal` / Socket.IO 的 4 组仿真场景测试（含 `t.replay` 中包含 `\x1b[>c` / `\x1b]10;?\x07` 查询序列时的 `t.c2s` 屏蔽与 `pendingS2c` 缓冲刷新、重叠二次 `t.replay` 下 `replayToken` 拦截过期回调、`disconnect` 失效在途重放、无历史缓冲会话即时 `t.resize`）全部通过（`ALL 4 SCENARIOS PASSED`），随后已清理临时目录。
+- 注：由于 `/source` 中前端脚本需通过 [`Dockerfile`](file:///source/Dockerfile#L11-L14) 打包进镜像部署至运行环境，需重新构建镜像或发布后在真实浏览器会话中生效。
+
+--------------------------------------------------------------------------------
+[Turn 5] Timestamp: 2026-11-13T09:06:58Z (Step: 78)
+--------------------------------------------------------------------------------
+
+USER:
+应用以下修改：建立socket时检查是否同源，跳过畸形t.resize(null)，对`session.resize` 补充上限cols <= 1000 && rows <= 1000，对 `t.c2s` 增加 `typeof data === "string"` 校验。对于chown/chmod注入，只允许简单文件名、用户名、组名的出现，不符合条件的在UI上显示“无法显示chmod/chown命令”。修复tar命令注入问题，对于含有auth,token,secret,key,access,cred,pass子串的header的值显示为[REDACTED]。alias目标名称不允许是别名。`build-data/init` 以 `exec` 启动 Node 进程。
+
+ACTIONS / TOOL CALLS:
+  - [Tool: run_command] `grep -rnP '[\x{4e00}-\x{9fff}]' /source/build-data/ || echo "NO_CHINESE_IN_BUILD_DATA"` (Check if build-data uses Chinese strings)
+  - [Tool: read_file] /source/build-data/server/download.js (Lines 1-105)
+  - [Tool: read_file] /source/build-data/client/download.html (Lines 230-280)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 55-100)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 255-300)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 360-520)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 610-680)
+  - [Tool: run_command] `tail -n 60 /source/.agent_worklog/20261016034737.log` (Check convention in recent agent worklog)
+  - [Tool: read_file] /source/.agent_worklog/20261016034737.log (Lines 1-120)
+  - [Tool: read_file] /source/.agent_worklog/20261016034737.log (Lines 180-290)
+  - [Tool: read_file] /agy/CODE_AUDIT_REPORT.md (Lines 140-200)
+  - [Tool: ask_question] 关于“alias目标名称不允许是别名”，在 `/control/alias/:identifier/:alias` 中具体是指哪一侧？ | 根据 AGENTS.md 规范，build-data 中代码和页面 UI 均为英文。download 页面中无法显示 chmod/chown 命令时的提示文本希望使用哪种语言？ -> Answer: A1: 我说错了，是alias目标名称不允许是已回收的session的名称 ; A2: (Recommended) 使用英文提示（如 "Unable to display chmod/chown command (unsupported characters)"）并禁用/隐藏对应 Copy 按钮
+  - [Tool: read_file] /source/build-data/client/download.html (Lines 160-280)
+  - [Tool: read_file] /source/build-data/client/download.js
+  - [Tool: read_file] /source/build-data/init
+  - [Tool: edit_file] /source/build-data/init
+  - [Tool: edit_file] /source/build-data/server/download.js
+  - [Tool: edit_file] /source/build-data/client/download.html
+  - [Tool: edit_file] /source/build-data/client/download.js
+  - [Tool: edit_file] /source/build-data/server/download.js
+  - [Tool: edit_file] /source/build-data/client/download.html
+  - [Tool: edit_file] /source/build-data/server/entry.js
+  - [Tool: edit_file] /source/build-data/server/entry.js
+  - [Tool: edit_file] /source/build-data/server/entry.js
+  - [Tool: edit_file] /source/build-data/server/entry.js
+  - [Tool: edit_file] /source/build-data/server/entry.js
+  - [Tool: edit_file] /source/build-data/server/entry.js
+  - [Tool: edit_file] /source/build-data/server/entry.js
+  - [Tool: run_command] `git -C /source diff -- build-data/init build-data/server/download.js build-data/client/...` (Inspect git diff of modified files)
+  - [Tool: run_command] `rm -rf /tmp/audit-verify && mkdir -p /tmp/audit-verify/server /tmp/audit-verify/client ...` (Run verification tests in temp directory)
+  - [Tool: run_command] `sed -i 's/!sentHtml.includes("chown ")/!sentHtml.includes("chown alice:") \&\& !sentHtm...` (Re-run verification tests in temp directory)
+  - [Tool: run_command] `sed -i 's/app.Router = () => ({ use() {}, get() {}, all() {} });/app.Router = () => ({ ...` (Run all verification tests and clean up)
+  - [Tool: run_command] `git -C /source status -s` (Verify modified files in git status)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 28-135)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 430-575)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 690-765)
+  - [Tool: read_file] /source/build-data/server/download.js (Lines 1-105)
+
+AGENT:
+已完成全部 9 项修改，并在独立临时目录完成语法检查与 Mock 单元测试验证：
+
+### 修改内容
+
+1. **Socket 同源校验**：[`entry.js`](file:///source/build-data/server/entry.js#L62-L128) & [`ws.use`](file:///source/build-data/server/entry.js#L694-L697)
+   - 新增 [`isSameOriginRequest`](file:///source/build-data/server/entry.js#L62-L115)，同时接入 Socket.IO `allowRequest` 与 `ws.use` 中间件：
+     - 校验 `Sec-Fetch-Site`（拒绝 `cross-site` 等非同源/非直接访问）；
+     - 解析并比对 `Origin` 与 `X-Forwarded-Host` / `Host`（含 `X-Forwarded-Proto` 协议一致性），兼容前置 TLS 反向代理；
+     - 对直接 WebSocket 升级请求强制要求存在合法 `Origin`。
+2. **`t.resize` 畸形入参与尺寸上限校验**：[`entry.js`](file:///source/build-data/server/entry.js#L30-L31)、[`Session.resize`](file:///source/build-data/server/entry.js#L336-L346)、[`t.resize`](file:///source/build-data/server/entry.js#L749-L754)
+   - `t.resize` 跳过 `null` 或非对象载荷，避免解构抛出 `TypeError`；
+   - `Session.resize` 增加上限约束 `c <= MAX_PTY_COLS && r <= MAX_PTY_ROWS`（`1000`）。
+3. **`t.c2s` 字符串类型校验**：[`entry.js`](file:///source/build-data/server/entry.js#L323-L326)、[`entry.js`](file:///source/build-data/server/entry.js#L742-L747)
+   - 在 `t.c2s` 监听与 `Session.write` 中校验 `typeof data === "string"`，忽略非字符串输入。
+4. **`chmod`/`chown` 命令注入防护**：[`server/download.js`](file:///source/build-data/server/download.js#L10-L84)、[`client/download.html`](file:///source/build-data/client/download.html#L179-L280)、[`client/download.js`](file:///source/build-data/client/download.js#L1-L6)
+   - 仅允许简单文件名（[`isSafeFilename`](file:///source/build-data/server/download.js#L15-L17)：`^[a-zA-Z0-9_.][a-zA-Z0-9_.-]*$` 且排除 `.` / `..`，禁止空格、`-` 开头及任何 Shell 元字符）与简单用户/组名（[`isSafePrincipal`](file:///source/build-data/server/download.js#L19-L21)：`^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$`）；
+   - 不满足条件时显示英文提示 `Unable to display chmod command (unsupported characters)` / `Unable to display chown command (unsupported characters)`（符合 [`AGENTS.md`](file:///source/AGENTS.md#L45) 英文规范），同时隐藏并禁用对应 Copy 按钮。
+5. **`tar` 参数注入修复**：[`server/download.js`](file:///source/build-data/server/download.js#L101)
+   - 目录打包 `spawn("tar", ["-czf", "-", "-C", parentDir, "--", baseName])` 补充 `--` 分隔符，防止以 `-` 开头的目录名被当作 `tar` 选项解析。
+6. **HTTP 日志敏感头脱敏**：[`entry.js`](file:///source/build-data/server/entry.js#L33)、[`entry.js`](file:///source/build-data/server/entry.js#L441-L446)
+   - 对所有名称包含 `auth`、`token`、`secret`、`key`、`access`、`cred`、`pass` 子串（不区分大小写）的请求头，日志输出值统一替换为 `"[REDACTED]"`。
+7. **`/control/alias` 禁止复用已回收会话名**：[`entry.js`](file:///source/build-data/server/entry.js#L557-L559)
+   - 当待创建的 `:alias` 存在于 `cleanedSessions` 时返回 `409 Conflict`。
+8. **`init` 以 `exec` 启动 Node 进程**：[`build-data/init`](file:///source/build-data/init#L1-L3)
+   - 改为 `cd /webterm && exec node server/entry.js`，由 Node 直接接管 PID 1 信号处理。
+
+### 验证结果
+- 已将 [`build-data/init`](file:///source/build-data/init)、[`build-data/server`](file:///source/build-data/server) 与 [`build-data/client`](file:///source/build-data/client) 复制到独立临时目录完成：
+  - `sh -n` 与 `node --check` 全部通过；
+  - Mock 单元测试（覆盖 `tar --` 参数传参、简单/含特殊字符文件名与用户名的 `download.html` 渲染与按钮禁用、同源/跨源/代理场景下的 `allowRequest`、日志敏感头 `[REDACTED]`、`t.c2s`/`t.resize(null)`/`1000` 上限校验、已清理会话名别名返回 `409`）全部通过（`ALL VERIFICATION TESTS PASSED`），测试后已清理临时目录。
+- 注：实际运行时生效需重新构建 Docker 镜像打包部署。
+
+--------------------------------------------------------------------------------
+[Turn 6] Timestamp: 2026-11-13T09:22:59Z (Step: 133)
+--------------------------------------------------------------------------------
+
+USER:
+增加http basic auth功能，容器可传入环境变量 HTTP_BASIC_AUTH，以'<user name>:<password hash>'的形式传入credential。具体的hash函数请你挑选一个，要求是server端做hash计算的时候可以方便地使用已有的可信赖的库函数（不要自己造轮子），兼顾用户生成hash的方便程度。如果不设置该环境变量，则不开启basic auth。注意不要在log里把用户名和密码/hash给打印出来了。评估以上需求，然后汇报。
+
+ACTIONS / TOOL CALLS:
+  - [Tool: run_command] `which node openssl htpasswd python3 mkpasswd 2>&1 || true` (Check available hash generation tools)
+
+AGENT:
+已完成对新增 `HTTP_BASIC_AUTH` 需求的技术评估，以下为方案选型、架构兼容性与潜在风险汇报（当前尚未修改代码，待确认后即可实施）。
+
+---
+
+### 1. Hash 算法与格式选型评估
+
+对比当前运行时环境（Debian `node` v20.19.2、`openssl`、`python3` 均已安装，未预装 `htpasswd`）与安全/易用性权衡：
+
+| 方案 | 服务端库函数 | 用户生成便利度 | 依赖与构建影响 | 综合评价 |
+| :--- | :--- | :--- | :--- | :--- |
+| **方案 A：`bcrypt`（推荐）**<br>格式：`<user>:$2a$/$2b$/$2y$...` | `bcryptjs`（纯 JS、`compare` 异步 API） | **高**：行业通用标准，支持 `htpasswd -nbB`、`caddy hash-password`、`mkpasswd -m bcrypt`、`python3 -c 'import bcrypt...'` 或随项目提供的 `node -e` 单行命令 | 需在 [`package.json`](file:///source/build-data/package.json) 新增纯 JS 包 `bcryptjs` 并更新 `package-lock.json`（无 C++ 原生编译，不影响 [`Dockerfile`](file:///source/Dockerfile) 构建） | **最契合**“业界可信库 + 用户生成极方便”，`htpasswd -nbB user pass` 的输出天然就是 `<user>:<hash>` 格式 |
+| **方案 B：`scrypt`（零依赖备选）**<br>格式：`<user>:scrypt$<salt>$<hash>` | Node.js 内置 `crypto.scrypt` + `crypto.timingSafeEqual` | **中**：标准 `openssl`/`htpasswd` 不支持直接生成，用户需执行项目提供的 `node -e`（或辅助脚本）生成 | **零外部 npm 依赖**，不修改锁文件，抗 GPU/ASIC 能力更强 | 若优先追求零第三方依赖则选此项 |
+| **方案 C：裸 `SHA-256`（不推荐）** | Node.js 内置 `crypto.createHash` | 极高（`sha256sum`） | 零依赖 | 无盐快速摘要易受彩虹表与离线暴破，不符合密码存储最佳实践 |
+
+> **兼容注意**：`htpasswd -nbB` 输出的哈希前缀为 `$2y$`，与 `$2a$`/`$2b$` 算法等价，选择库和校验正则时需同时兼容 `$2a$`、`$2b$`、`$2y$`。
+
+---
+
+### 2. 必须注意的架构与安全边界（结合现有代码）
+
+#### 2.1 子进程环境变量继承泄露（关键发现）
+在 [`entry.js`](file:///source/build-data/server/entry.js#L35-L41) 中，PTY 进程环境变量使用了：
+```js
+const ENV = {
+  ...process.env,
+  ...
+};
+```
+若直接通过环境变量传入 `HTTP_BASIC_AUTH`，所有 `/s/:name`（Bash）和 `/a/:name`（`agy`）子进程都会继承 `HTTP_BASIC_AUTH`（用户或 AI 执行 `env` / 日志记录即直接暴露用户名与哈希）。
+- **对策**：在 [`entry.js`](file:///source/build-data/server/entry.js) 启动读取并解析 `HTTP_BASIC_AUTH` 后，立即从 `process.env` 与 `ENV` 中删除 `HTTP_BASIC_AUTH`（`delete ENV.HTTP_BASIC_AUTH` / `delete process.env.HTTP_BASIC_AUTH`）。
+
+#### 2.2 Socket.IO 绕过 Express 中间件风险
+[`entry.js`](file:///source/build-data/server/entry.js#L121-L128) 将 `socket(server, ...)` 直接挂载在原生 `http.Server` 上，`/socket.io/` 轮询和 WebSocket `upgrade` 请求**不会经过 Express `handler` 中间件**。仅在 Express 注册 Basic Auth 中间件会导致 `/socket.io/` 被直接绕过。
+- **对策**：必须在 Express 全局中间件（所有静态资源与路由之前）**以及** Socket.IO `allowRequest`（和 `ws.use`）两处统一执行 Basic Auth 校验。浏览器通过页面首个 `401` 弹窗认证后，同源下的 `XMLHttpRequest`（[`upload.js`](file:///source/build-data/client/upload.js#L389)）、`fetch`（[`viewer.js`](file:///source/build-data/client/viewer.js#L186)）与 `/socket.io/` 握手均会自动附带 `Authorization` 头；CLI 工具（如 `curl -u`）访问 `/control/download` 也可正常认证。
+
+#### 2.3 日志与错误信息防泄露
+- HTTP 日志中间件（[`entry.js`](file:///source/build-data/server/entry.js#L441-L446)）已对含 `auth` 子串的头输出 `[REDACTED]`，因此 `Authorization: Basic ...` 不会落盘。
+- 需额外确保：
+  - `HTTP_BASIC_AUTH` 配置格式非法时（如缺少 `:`、用户名为空、hash 前缀无效），**启动即报错退出（fail-fast）**，避免降级为无认证放行，且报错信息中**绝不打印环境变量原文、用户名或 hash**；
+  - 认证成功/失败日志、401 响应体中不输出用户名、密码或 hash（仅返回固定 `"Unauthorized\n"` 及 `WWW-Authenticate: Basic realm="Web Terminal", charset="UTF-8"`）。
+
+#### 2.4 性能与事件循环阻塞风险
+慢哈希（`bcrypt`/`scrypt`）单次校验耗时约 `30–250ms`。打开终端页面会并发请求 HTML、`/static/*`（10+ 资源）及 `/socket.io/`，若每个请求都同步/重复做哈希计算会阻塞 Node.js 单线程事件循环，导致终端输入明显卡顿。
+- **对策**：
+  1. 必须使用**异步**验证接口（`bcrypt.compare` 或异步 `crypto.scrypt`）；
+  2. 增加**短期内存校验缓存**（例如以进程启动随机密钥对 `Authorization` 头做 HMAC-SHA256 为 Key，仅缓存验证结果 `true`、上限 64 条、TTL 60 秒，不保存明文密码/Base64），兼顾并发静态资源加载流畅性与凭证安全性。
+
+#### 2.5 解析细节与安全细节
+- **首个冒号拆分**：无论是环境变量 `<user>:<hash>` 还是解码后的 Basic Auth `username:password`，都必须按**第一个 `:`** 拆分（`indexOf(":")`，禁止 `split(":")` 丢失密码中的冒号）；用户名不允许包含 `:`。
+- **恒定时间校验（防用户名枚举）**：不能在用户名不匹配时直接 `return false` 跳过哈希运算，应对用户名使用 `crypto.timingSafeEqual` 比对（或等长 SHA-256 摘要比对），且无论用户名是否匹配都执行一次哈希比较以对齐响应时间。
+- **环境变量未设置语义**：`process.env.HTTP_BASIC_AUTH` 未定义或为空字符串时，不开启 Basic Auth；若设置了非空值但格式不合法，则严格拒绝启动。
+
+#### 2.6 部署与运维注意事项
+1. **Docker Compose `$` 转义坑**：`$2b$10$...` 中的 `$` 会被 `docker-compose.yml` 当作变量插值替换掉，文档中需明确提示写为 `$$2b$$10$$...` 或通过 `.env` / `docker run -e 'HTTP_BASIC_AUTH=...'` 传入。
+2. **与前置 Basic Auth 反代的互斥**：若前置反向代理本身也使用 HTTP Basic Auth，同一域名下浏览器只能保留一组 `Authorization` 凭据（反代认证方案如 Cloudflare Access / Cookie SSO 则无冲突）。
+
+---
+
+### 3. 待确认事项
+请确认以下两点以便开始实现：
+1. **Hash 算法选择**：采用**方案 A（`bcryptjs`，标准 `$2a$/$2b$/$2y$`，兼容 `htpasswd -nbB`）**，还是**方案 B（零依赖 Node 内置 `crypto.scrypt`）**？
+2. **是否需要内置生成脚本/命令说明**：是否需要在 [`README.md`](file:///source/README.md) 补充生成命令示例（若选 `bcryptjs` 也可提供 `node -e` 与 `htpasswd -nbB` 两种用法）？
+
+--------------------------------------------------------------------------------
+[Turn 7] Timestamp: 2026-11-13T09:29:27Z (Step: 137)
+--------------------------------------------------------------------------------
+
+USER:
+C方案（sha-256）不可以加盐吗？
+
+AGENT:
+**可以加盐**，但“手工单次加盐 SHA-256”与“标准慢哈希（`PBKDF2-SHA256` / `bcrypt` / `scrypt`）”在**抗暴破强度**和**生成便利度**上有本质区别，具体对比如下：
+
+---
+
+### 1. 为什么“单次加盐 SHA-256”仍存在明显短板？
+
+1. **加盐只防彩虹表，不防高速暴力破解**
+   - 单次 `SHA-256(salt + password)` 的计算速度极快（现代消费级 GPU 每秒可达**百亿次**级别）。
+   - 只要 `HTTP_BASIC_AUTH`（如 `docker-compose.yml`、`.env`、CI 变量或 `docker inspect`）意外泄露，加盐可以阻止预计算彩虹表，但无法阻止针对非高熵密码的快速暴力破解。
+2. **并没有让用户生成更方便**
+   - `sha256sum` 本身不带盐；要加盐，用户必须先生成随机 salt 再拼接计算（如自定义 `<user>:<salt>$<hex>` 格式），操作反而不如标准工具一行命令方便，而且需要自己定义非标准拼接格式（需自行考虑分隔符与盐长度校验）。
+
+---
+
+### 2. 如果偏好 SHA-256 家族且想用 Node 内置库，更好的选择是什么？
+
+| 实现方式 | 原理 | 服务端库（零/低依赖） | 用户生成方式 | 安全性 |
+| :--- | :--- | :--- | :--- | :--- |
+| **单次加盐 SHA-256**<br>（如 `sha256$<salt>$<hex>`） | 加盐 + 1 次 SHA-256 | Node 内置 `crypto.createHash("sha256")`（极快、无需验证缓存） | 需手动拼盐脚本 | **防彩虹表**；仅当密码为高熵随机串时足够 |
+| **`PBKDF2-HMAC-SHA256`**<br>（标准慢哈希） | 加盐 + 几十万次 HMAC-SHA256 迭代 | Node 内置 **`crypto.pbkdf2`**（零外部依赖，NIST 标准） | 一行 `node -e` 或 `python3 -c` | **防彩虹表 + 抗 GPU 暴破** |
+| **`SHA-256 crypt` (`$5$`)** | 加盐 + 5000+ 轮 SHA-256 | Node **未内置**，需引入第三方 crypt 库 | Linux 下可用 `openssl passwd -5`（macOS LibreSSL 不支持 `-5`） | 中强 |
+| **`bcrypt` (`$2a$/$2b$/$2y$`)** | 加盐 + Blowfish 密钥扩展 | `bcryptjs`（纯 JS 可信库） | **`htpasswd -nbB user pass`** 直接吐出 `<user>:<hash>` | **强** |
+
+---
+
+### 3. 工程权衡建议
+
+1. **如果最看重“标准生态 + 生成最省事”** → 仍首推 **`bcrypt`（`bcryptjs`）**，`htpasswd -nbB` 一步到位。
+2. **如果最看重“零外部 npm 依赖 + 基于 SHA-256 / Node 原生库”** → 建议用 **`PBKDF2-HMAC-SHA256`（`crypto.pbkdf2`）** 或 **`scrypt`（`crypto.scrypt`）**，同样完全基于 Node.js 内置标准库，安全性比单次加盐 SHA-256 高数个数量级；生成端可顺带在仓库提供一个小脚本或单行 `node -e` 命令。
+3. **如果确认密码本身就是高熵随机密钥**（例如 `openssl rand -base64 24` 生成）且希望认证零延迟开销 → 单次加盐 SHA-256 也可行（但仍建议配套文档说明仅适用于高熵随机密码）。
+
+你倾向采用哪一种？（也可以考虑在服务端用同一套校验器同时兼容多种前缀，例如同时支持 `$2a$/$2b$/$2y$`（`bcrypt`）与 `$pbkdf2-sha256$`/`$scrypt$`。）
+
+--------------------------------------------------------------------------------
+[Turn 8] Timestamp: 2026-11-13T09:33:28Z (Step: 139)
+--------------------------------------------------------------------------------
+
+USER:
+执行，其中hash使用SHA-256 crypt方案，另外更新readme文档。
+
+ACTIONS / TOOL CALLS:
+  - [Tool: run_command] `openssl passwd -5 -salt testsalt mypassword && python3 -c 'import crypt; print(crypt.cr...` (Check openssl, python3 crypt, and npm availability)
+  - [Tool: run_command] `npm --version && openssl version && npm view unix-crypt-td-js sha256-crypt-nodejs @skyl...` (Check npm registry and openssl version)
+  - [Tool: run_command] `npm view unix-crypt-td-js --json 2>&1 | head -n 30; echo "---"; npm view sha256-crypt-n...` (Check npm crypt packages and openssl passwd -5)
+  - [Tool: run_command] `npm search --json "sha256-crypt" 2>&1 | head -n 40; echo "---"; npm view sha256crypt cr...` (Search npm for sha256 crypt libraries)
+  - [Tool: run_command] `npm view apache-crypt --json; echo "---"; npm view @vlasky/shacrypt --json; echo "---";...` (Inspect apache-crypt and shacrypt package metadata)
+  - [Tool: run_command] `rm -rf /tmp/shacrypt-check && mkdir -p /tmp/shacrypt-check && cd /tmp/shacrypt-check &&...` (Inspect @vlasky/shacrypt in temp directory)
+  - [Tool: run_command] `cd /tmp/shacrypt-check && node -e ' const shacrypt = require("@vlasky/shacrypt"); (asyn...` (Test @vlasky/shacrypt interoperability with openssl passwd -5)
+  - [Tool: run_command] `rm -rf /tmp/pkg-update && mkdir -p /tmp/pkg-update && cp /source/build-data/package.jso...` (Generate updated package.json and lockfile in temp dir)
+  - [Tool: read_file] /source/README.md (Lines 25-120)
+  - [Tool: run_command] `printf 'testpass\n' | openssl passwd -5 -stdin && printf 'testpass\n' | openssl passwd ...` (Test openssl passwd -5 command examples)
+  - [Tool: run_command] `rm -rf /tmp/pkg-gen && mkdir -p /tmp/pkg-gen/webterm && cp /source/build-data/package.j...` (Generate exact lockfile update in temp webterm dir)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 1-45)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 690-771)
+  - [Tool: read_file] /source/build-data/package-lock.json (Lines 1-60)
+  - [Tool: read_file] /source/build-data/package-lock.json (Lines 705-745)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 445-475)
+  - [Tool: write_file] /source/build-data/server/auth.js
+  - [Tool: edit_file] /source/build-data/package.json
+  - [Tool: edit_file] /source/build-data/package-lock.json
+  - [Tool: edit_file] /source/build-data/package-lock.json
+  - [Tool: edit_file] /source/build-data/package-lock.json
+  - [Tool: edit_file] /source/build-data/server/entry.js
+  - [Tool: edit_file] /source/build-data/server/entry.js
+  - [Tool: edit_file] /source/build-data/server/entry.js
+  - [Tool: edit_file] /source/build-data/server/entry.js
+  - [Tool: edit_file] /source/build-data/server/entry.js
+  - [Tool: edit_file] /source/README.md
+  - [Tool: run_command] `sh -c 'printf "testpass\n" | printf "alice:%s\n" "$(openssl passwd -5 -stdin -salt "rou...` (Verify custom rounds openssl command in sh and bash)
+  - [Tool: edit_file] /source/README.md
+  - [Tool: run_command] `ss -tln 2>/dev/null || netstat -tln 2>/dev/null || true` (Check listening ports before temp test server)
+  - [Tool: run_command] `rm -rf /tmp/pkg-gen /tmp/auth-e2e && mkdir -p /tmp/auth-e2e && cp -r /source/build-data...` (Run npm ci and E2E Basic Auth tests in temp dir)
+  - [System: background task 3a6f176d-c3ac-4b5f-98bb-f2e00241eb94/task-190] Command exited with code 0.
+  - [Tool: run_command] `rm -rf /tmp/auth-off-check && mkdir -p /tmp/auth-off-check && cp -r /source/build-data/...` (Verify disabled mode and git status)
+  - [Tool: read_file] /source/README.md (Lines 25-80)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 12-35)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 485-505)
+  - [Tool: read_file] /source/build-data/server/entry.js (Lines 720-815)
+
+AGENT:
+已启动临时测试目录的 `npm ci` 安装与端到端集成测试（验证 `@vlasky/shacrypt`、Express 鉴权中间件、Socket.IO 握手保护、日志脱敏及环境变量隔离），等待执行完成后汇报结果。
+
+已完成基于 **SHA-256 crypt（`$5$...`）** 的 `HTTP_BASIC_AUTH` 功能实现与 [`README.md`](file:///source/README.md) 文档更新。
+
+### 修改内容
+
+1. **依赖引入**：[`build-data/package.json`](file:///source/build-data/package.json#L3)、[`build-data/package-lock.json`](file:///source/build-data/package-lock.json#L8)
+   - 引入 `@vlasky/shacrypt`（`^0.6.0`，基于 Ulrich Drepper SHA-256 crypt C 参考实现，内置 N-API 预编译包与 `crypto.timingSafeEqual` 恒定时间比对，并在 libuv 线程池异步运行 `verifyAsync`）。
+2. **认证模块**：[`build-data/server/auth.js`](file:///source/build-data/server/auth.js)
+   - [`parseBasicAuthEnv`](file:///source/build-data/server/auth.js#L13-L45)：环境变量未设置或为空时返回 `null`（不开启）；非空时按首个 `:` 拆分 `<username>:<hash>`，严格要求 `$5$` 前缀并在启动时调用 `shacrypt.verify` 校验合法性（上限 `MAX_CRYPT_ROUNDS = 1000000`），格式非法立即抛错退出；所有错误信息及配置对象均不回显或保留明文用户名与原始哈希明文（用户名存储 SHA-256 摘要）。
+   - [`createBasicAuthVerifier`](file:///source/build-data/server/auth.js#L47-L133)：按首个 `:` 解码 `Authorization: Basic ...`，对用户名使用 `crypto.timingSafeEqual` 比对且无论用户名是否匹配均执行 `shacrypt.verifyAsync` 防时序枚举；对同凭证并发请求做 in-flight 去重并使用进程随机密钥 HMAC 为索引的短期缓存（60s / 上限 64 条，不存明文凭证）。
+   - [`createBasicAuthMiddleware`](file:///source/build-data/server/auth.js#L135-L154)：未通过认证统一返回 `401 Unauthorized` 与 `WWW-Authenticate: Basic realm="Web Terminal", charset="UTF-8"`。
+3. **服务端集成与防泄露**：[`build-data/server/entry.js`](file:///source/build-data/server/entry.js#L15-L28)
+   - 启动时解析 `process.env.HTTP_BASIC_AUTH` 后立即 `delete process.env.HTTP_BASIC_AUTH`，防止 `ENV = { ...process.env }` 将凭据继承给 `bash` / `agy` PTY 子进程。
+   - 在全部静态资源与业务路由前注册 Express Basic Auth 中间件（[`entry.js`](file:///source/build-data/server/entry.js#L492-L495)），并在 Socket.IO [`allowRequest`](file:///source/build-data/server/entry.js#L138-L150) 与 [`ws.use`](file:///source/build-data/server/entry.js#L721-L730) 同步校验（防止通过 `/socket.io/` 绕过 Express 中间件）。
+   - 启动日志仅输出 `HTTP Basic Auth: enabled` / `disabled`（[`entry.js`](file:///source/build-data/server/entry.js#L803-L805)），请求日志由已有敏感头脱敏机制将 `authorization` 输出为 `[REDACTED]`。
+4. **文档更新**：[`README.md`](file:///source/README.md#L26-L70)
+   - 更新 Security Model 并补充 `Optional HTTP Basic Authentication (HTTP_BASIC_AUTH)` 说明，提供 Linux `openssl passwd -5`、跨平台容器命令、自定义 rounds 示例及 Docker CLI 单引号 / `docker-compose.yaml` 中 `$$` 转义注意事项。
+
+### 验证结果
+已在独立临时测试目录中执行 `npm ci` 并完成全量端到端与单元测试（临时目录测试完毕后均已清理）：
+- 语法检查（`node --check`）：[`auth.js`](file:///source/build-data/server/auth.js) 与 [`entry.js`](file:///source/build-data/server/entry.js) 均通过。
+- 启用 `HTTP_BASIC_AUTH`（实测 `openssl passwd -5` 生成含冒号密码的真实哈希）：
+  - 非法配置（缺少 `:`、非 `$5$` 前缀、损坏哈希）触发退出码 `1` 且标准输出/错误流无用户名或哈希泄露；
+  - 启动后 `process.env.HTTP_BASIC_AUTH` 为 `undefined`；
+  - 未认证或错误凭据访问 `/control/list`、`/static/main.js` 返回 `401`（带 `WWW-Authenticate`），正确凭据返回 `200`；
+  - `/socket.io/` 握手未带凭据或跨源均被拒绝（`400`/`403`），同源且凭据正确时返回 `200`；
+  - 断言全部日志输出不包含用户名、明文密码、Base64 凭据或哈希字符串，且 `authorization` 显示为 `[REDACTED]`（`ALL AUTH E2E TESTS PASSED`）。
+- 未设置 `HTTP_BASIC_AUTH`：服务输出 `HTTP Basic Auth: disabled`，未带认证访问 `/control/list` 正常返回 `200`（`DISABLED MODE TEST PASSED`）。
+- 注：新依赖 `@vlasky/shacrypt` 与认证代码需重新构建 Docker 镜像后在运行容器中生效。
+
+--------------------------------------------------------------------------------
+[Turn 9] Timestamp: 2026-11-13T09:40:41Z (Step: 201)
+--------------------------------------------------------------------------------
+
+USER:
+这个vlasky/shacrypt靠谱吗？可信吗？为什么感觉这个包很小众呢？
+
+ACTIONS / TOOL CALLS:
+  - [Tool: run_command] `rm -rf /tmp/inspect-shacrypt && mkdir -p /tmp/inspect-shacrypt && cd /tmp/inspect-shacr...` (Inspect @vlasky/shacrypt source, downloads, and provenance)
+  - [Tool: read_file] /tmp/inspect-shacrypt/node_modules/@vlasky/shacrypt/src/shacrypt.cc
+  - [Tool: read_file] /tmp/inspect-shacrypt/node_modules/@vlasky/shacrypt/src/secure_wipe.h
+  - [Tool: read_file] /tmp/inspect-shacrypt/node_modules/@vlasky/shacrypt/src/sha256crypt.c (Lines 1-120)
+  - [Tool: read_file] /tmp/inspect-shacrypt/node_modules/@vlasky/shacrypt/package.json
+  - [Tool: read_file] /tmp/inspect-shacrypt/node_modules/@vlasky/shacrypt/CHANGELOG.md
+  - [Tool: read_file] /tmp/inspect-shacrypt/node_modules/@vlasky/shacrypt/shacrypt.js (Lines 1-160)
+  - [Tool: read_file] /tmp/inspect-shacrypt/node_modules/@vlasky/shacrypt/src/sha256crypt.c (Lines 121-577)
+  - [Tool: run_command] `rm -rf /tmp/inspect-shacrypt` (Clean up temporary shacrypt inspection dir)
+
+AGENT:
+你非常敏锐。经实际核查，`@vlasky/shacrypt` 确实是一个**下载量很小的新兴个人维护包**（近 30 天 npm 下载量约 **1,149 次**），谨慎审查它的可信度完全必要。我下载并通读了它的全部源码（JS 包装层 + N-API C++ 层 + C 实现）以及 npm 供应链元数据，以下是客观评估结论：
+
+---
+
+### 一、 为什么它这么小众？
+
+1. **需求本身小众**：Node.js 生态的密码哈希主流是 `bcrypt`、内置 `crypto.scrypt` 和 `argon2`；SHA-256 crypt（`$5$`）主要是 Linux `/etc/shadow` 和 `crypt(3)` 的标准格式，在 Node.js Web 项目中很少有人特意使用它。
+2. **老包弃用后的新 Fork**：npm 上原本有个老包 `shacrypt`（`0.1.3`，2019 年后停更，且存在静态缓冲区异步数据竞争漏洞）；`@vlasky/shacrypt` 是基于其重构加固并在 2026-11-01 发布 `0.6.0` 的新命名空间版本，所以历史下载量基数小。
+
+---
+
+### 二、 源码与供应链实审结果：它到底靠不靠谱？
+
+从技术与当前版本（`0.6.0`）内容来看，**实现质量相当扎实，没有恶意行为**；主要风险在“单维护者原生包”的治理层面：
+
+#### 1. 可信与安全亮点（直接审阅其源码确认）
+- **算法核心干净**：C 核心 `sha256crypt.c`（577 行）是标准的 **Ulrich Drepper SHA-256 crypt 公有领域参考实现**，无任何网络请求、文件读写或无关系统调用。
+- **工程与安全细节远超一般小包**：
+  - 使用可重入函数 `sha256_crypt_r()`，并将工作缓冲区从栈上 `alloca()` 改为堆分配后用 `volatile` 指针 `secure_wipe()` 强制清零（防止编译器优化掉清零逻辑）；
+  - C++ N-API 层（`shacrypt.cc`）直接从 V8 读取 UTF-8 到 `SecretString` 并在使用后立刻擦除，拒绝内嵌 `\0` 截断；
+  - `verifyAsync()` 在 libuv 线程池异步运行，结合 Node 内置 `crypto.timingSafeEqual()` 做恒定时间比对，并对 `rounds`（1,000–999,999,999）及密码字节上限（511 字节，对齐 `libxcrypt`）做了严格校验；
+  - `shacrypt.js` 依赖极少（仅 `node-addon-api` 与 `node-gyp-build`）。
+- **发布链路可溯源**：npm 注册表记录显示 `0.6.0` 带有 **GitHub Actions OIDC 签发的 SLSA v1 Provenance** 证明（`https://slsa.dev/provenance/v1`），而非私人电脑直接打包上传，且已在 [`build-data/package-lock.json`](file:///source/build-data/package-lock.json#L53-L65) 中锁死了版本号和 `sha512` integrity 哈希。
+
+#### 2. 仍存在的供应链顾虑
+- **Single-Maintainer 风险（Bus Factor = 1）**：属于个人维护者项目；且包含原生 C++ 编译/预编译二进制（`.node`）。
+- **构建锁文件习惯**：目前 [`Dockerfile`](file:///source/Dockerfile#L45) 使用的是 `npm install` 而非 `npm ci`；只要把版本锁死且改用 `npm ci`，就能严格校验 `package-lock.json` 的 `sha512` 哈希，避免被上游悄悄拉取新版本。
+
+---
+
+### 三、 如果依然介意第三方小众包，零外部依赖替代方案
+
+即便代码本身没问题，如果你希望**完全不引入任何小众 npm 密码包**，保留 SHA-256 crypt（`$5$`）格式还有一条完全可行的原生方案：
+
+- **直接调用容器自带的 OpenSSL（`3.5.7`）**：
+  - 通过 `child_process.execFile("/usr/bin/openssl", ["passwd", "-5", "-salt", parsedSettings, "-stdin"])`（密码走 `stdin` 管道、不进命令行参数、也不启动 shell）计算哈希，再用 Node 内置 `crypto.timingSafeEqual` 比对。
+  - **优点**：**零额外 npm 包**，直接复用 Debian 官方 `openssl` 可信实现；结合 [`auth.js`](file:///source/build-data/server/auth.js#L47-L133) 已经做好的 60s 内存缓存与并发去重，每次登录只触发 1 次 `openssl` 进程（几毫秒），后续请求直接命中内存缓存。
+  - **前提**：仅需在 JS 中用 15 行严格正则校验并提取 `$5$[rounds=N$]<salt>` 设置串（确保不以 `-` 开头且仅含合法盐字符），以及要求运行环境存在 `openssl`（本镜像已内置）。
+
+---
+
+### 建议
+- **维持当前方案**：需注意将 [`Dockerfile`](file:///source/Dockerfile#L45) 的 `npm install` 改为 `npm ci` 以严格锁定 `0.6.0` 的完整性校验，技术安全性上是过关的。
+- **追求零第三方依赖**：如果你倾向彻底移除 `@vlasky/shacrypt`，我可以立刻把它替换为 **Node 原生调用 `/usr/bin/openssl passwd -5 -stdin`**，保持对外环境变量与文档完全不变。需要切换吗？
+
+--------------------------------------------------------------------------------
+[Turn 10] Timestamp: 2026-11-13T09:43:49Z (Step: 217)
+--------------------------------------------------------------------------------
+
+USER:
+维持当前方案，我希望依然使用npm install，但是只对这个vlasky/shacrypt包做锁定，这是可以做到的吗
+
+ACTIONS / TOOL CALLS:
+  - [Tool: run_command] `rm -rf /tmp/pin-check && mkdir -p /tmp/pin-check/webterm && cp /source/build-data/packa...` (Check exact version pin behavior with npm install)
+
+AGENT:
+**可以做到。** 即使 [`Dockerfile`](file:///source/Dockerfile#L45) 继续保持 `npm install` 不变，只要只把 `@vlasky/shacrypt` 改为**精确版本锁定**并保留 [`build-data/package-lock.json`](file:///source/build-data/package-lock.json)，就能单独把该包锁死在已审计的 `0.6.0`，同时不影响其他依赖继续沿用 `^` 语义。
+
+### 实现方式与锁定层级
+
+1. **锁定 `@vlasky/shacrypt` 主版本（去掉 `^`）**
+   - 将 [`build-data/package.json`](file:///source/build-data/package.json#L3) 中的 `"@vlasky/shacrypt": "^0.6.0"` 改为 `"@vlasky/shacrypt": "0.6.0"`（并同步更新 [`build-data/package-lock.json`](file:///source/build-data/package-lock.json#L8) 根依赖声明，其他包保持不变）。
+   - 效果：无论直接运行 `npm install`、`npm update`，还是重新生成 lockfile，`@vlasky/shacrypt` 都绝不会升级到 `0.6.1+` 或其他版本。
+
+2. **Tarball `sha512` 完整性校验（已生效）**
+   - [`Dockerfile`](file:///source/Dockerfile#L43-L45) 已同时拷贝 `package.json` 和 `package-lock.json`。
+   - 当 lockfile 满足 `package.json` 范围时，`npm install` 会直接按 lockfile 中的精确版本和 `integrity`（`sha512-HvCbyzOEdoN5qhOHfXwI3He5MdWjNHwGmR1Nz4HtlFUfABvP0s1+zEMt52aLdhZL7fdTTNd3fY/8HGLOvsuiKg==`）安装并校验 tarball 哈希，同时也会使用锁定的子依赖 `node-addon-api@8.9.2` 与 `node-gyp-build@4.8.4`。
+
+3. **（可选）即使删掉 lockfile 也锁定它的两个传递依赖**
+   - `@vlasky/shacrypt` 只有 `node-addon-api`（`^8.9.2`）和 `node-gyp-build`（`^4.8.4`）两个依赖。如果希望即便在无 `package-lock.json` 时运行 `npm install` 也不升级这两个子依赖，可在 [`build-data/package.json`](file:///source/build-data/package.json) 中加入局部 `overrides`：
+     ```json
+     "overrides": {
+       "@vlasky/shacrypt": {
+         "node-addon-api": "8.9.2",
+         "node-gyp-build": "4.8.4"
+       }
+     }
+     ```
+
+### 需要注意的边界差异
+- 与 `npm ci` 的唯一区别在于：如果未来有人修改了 `package.json` 中**其他**带 `^` 的依赖但忘记更新 `package-lock.json`，`npm install` 会重新解析更新那些依赖而不会报错中断；不过即便发生重新解析，`@vlasky/shacrypt` 本身因写死了 `"0.6.0"`，依然不会被升级。
+
+需要我现在就把 [`build-data/package.json`](file:///source/build-data/package.json) 和 [`build-data/package-lock.json`](file:///source/build-data/package-lock.json) 中的 `@vlasky/shacrypt` 改为精确版本 `"0.6.0"`（以及是否顺便加上局部 `overrides`）吗？
+
+--------------------------------------------------------------------------------
+[Turn 11] Timestamp: 2026-11-13T09:45:23Z (Step: 221)
+--------------------------------------------------------------------------------
+
+USER:
+好，也加上override
+
+ACTIONS / TOOL CALLS:
+  - [Tool: read_file] /source/build-data/package.json
+  - [Tool: edit_file] /source/build-data/package.json
+  - [Tool: run_command] `rm -rf /tmp/override-gen && mkdir -p /tmp/override-gen/webterm && cp /source/build-data...` (Generate lockfile diff with overrides in temp dir)
+  - [Tool: edit_file] /source/build-data/package-lock.json
+  - [Tool: run_command] `rm -rf /tmp/override-gen && mkdir -p /tmp/override-gen/webterm && cp /source/build-data...` (Verify npm install and npm ci lock consistency)
+  - [System: background task 3a6f176d-c3ac-4b5f-98bb-f2e00241eb94/task-231] Command exited with code 0.
+  - [Tool: read_file] /source/build-data/package.json
+  - [Tool: run_command] `git -C /source status -s` (Check git status in source)
+  - [Tool: run_command] `git -C /source status && cat /source/build-data/init` (Check full git status and init file)
+  - [Tool: run_command] `git -C /source log -n 3 --oneline --stat` (Check recent commits in source)
+
+AGENT:
+已修改 [`build-data/package.json`](file:///source/build-data/package.json) 和 [`build-data/package-lock.json`](file:///source/build-data/package-lock.json)，正在临时目录中校验 `npm install` 与 `npm ci` 的锁定一致性，稍等片刻即可完成。
+
+已将 `@vlasky/shacrypt` 及其直接传递依赖锁定完成，同时保留了 [`Dockerfile`](file:///source/Dockerfile#L45) 中 `npm install` 对其余依赖的原有行为：
+
+### 修改内容
+1. [`build-data/package.json`](file:///source/build-data/package.json#L3-L23)
+   - 将 `"@vlasky/shacrypt"` 从 `"^0.6.0"` 改为精确版本 `"0.6.0"`；
+   - 新增局部 `"overrides"`，将其两个直接传递依赖精确钉死为 `"node-addon-api": "8.9.2"` 与 `"node-gyp-build": "4.8.4"`。
+2. [`build-data/package-lock.json`](file:///source/build-data/package-lock.json#L8)
+   - 同步将根依赖声明更新为 `"@vlasky/shacrypt": "0.6.0"`，与锁定版本号及 `sha512` integrity 保持一致。
+
+### 验证结果
+已在独立临时目录对更新后的 [`build-data/package.json`](file:///source/build-data/package.json) 与 [`build-data/package-lock.json`](file:///source/build-data/package-lock.json) 执行校验（完成后已清理临时目录）：
+- `npm install` 后 `package-lock.json` 无任何漂移（`diff -u` 为空）；
+- `npm ls` 确认已安装 `@vlasky/shacrypt@0.6.0`、其子依赖 `node-addon-api@8.9.2` 及 `node-gyp-build@4.8.4` 均显示 `overridden`；
+- `npm ci` 同样通过校验。
+
+--------------------------------------------------------------------------------
+[Turn 12] Timestamp: 2026-11-13T09:49:20Z (Step: 242)
+--------------------------------------------------------------------------------
+
+USER:
+增加功能：当用户直接拖拽文件到web term时，后台执行上传文件功能，如有文件名冲突自动重命名filename.ext为 filename_1.ext 的形式，序号递增。对该需求进行评估。
+
+ACTIONS / TOOL CALLS:
+  - [Tool: read_file] /source/build-data/client/index.html
+  - [Tool: read_file] /source/build-data/client/main.js (Lines 1-160)
+  - [Tool: read_file] /source/build-data/client/main.js (Lines 310-429)
+  - [Tool: read_file] /source/build-data/server/upload.js
+
+AGENT:
+已完成对该需求的全面技术评估（当前尚未修改代码），结论是**高度可行，现有上传基础设施可充分复用，但有几处关键架构细节与边界情况需要先对齐**。
+
+---
+
+### 1. 现有架构复用基础
+
+- **服务端上传管道现成**：[`server/upload.js`](file:///source/build-data/server/upload.js#L15-L138) 已实现基于 `PUT /control/upload` 的流式写入 + 临时文件原子 `rename` + 断线清理逻辑。
+- **前端拖拽与流式上传现成**：[`client/upload.js`](file:///source/build-data/client/upload.js#L222-L286) 已实现完整的 `DataTransfer` 文件与目录递归解析及 XHR `PUT` 进度监听（[`uploadSingleFile`](file:///source/build-data/client/upload.js#L387-L421)）。
+- **鉴权兼容**：启用 `HTTP_BASIC_AUTH` 时，同源页面的 `XMLHttpRequest` 会自动携带浏览器认证凭证，无需额外认证改造。
+
+---
+
+### 2. 关键技术难点与边界评估
+
+#### 2.1 冲突自动重命名（`filename_1.ext`）应由服务端主导，而非前端轮询 409
+- **原因**：若由前端先试传再根据 `409 Conflict` 重命名重传，遇到大文件浪费传输带宽，且多文件同时拖拽时存在并发竞态（TOCTOU）。
+- **建议方案**：在 [`server/upload.js`](file:///source/build-data/server/upload.js) 新增参数（如 `?autorename=1`），由服务端统一判定并落盘：
+  - **原子防并发覆盖**：Node.js 的 `fs.rename()` 在目标已存在时会直接覆盖。开启 `autorename` 落盘时应循环生成候选路径，并用 `fs.link(tempPath, candidatePath)`（遇到 `EEXIST` 则序号 `+1` 重试，成功后 `fs.unlink(tempPath)`；仅在跨文件系统/不支持硬链接的特殊挂载时兜底 `lstat` + `rename`），从而消除并发覆盖竞态。
+  - **响应返回最终路径**：返回 JSON 中包含实际落盘路径 `path`（及 `renamed: true`），供前端提示用户实际保存的文件名。
+
+#### 2.2 文件名拆分规则（`filename.ext` → `filename_1.ext`）边界
+实现拆分函数时需注意以下 5 类边界情况：
+1. **无扩展名文件**：`README` → `README_1`、`README_2`。
+2. **隐藏文件（Dotfile）**：`.gitignore`、`.env` 的前导 `.` 不是扩展名分隔符，应变为 `.gitignore_1`（而非错误拆成 `_1.gitignore`）。
+3. **复合扩展名**：如 `archive.tar.gz`（按常见规范通常以最后一个 `.` 拆分为 `archive.tar_1.gz`，或显式识别 `.tar.gz`/`.tar.bz2`/`.tar.xz` 为 `archive_1.tar.gz`，需提前确定偏好）。
+4. **与现有 `_N` 文件冲突**：
+   - 若服务端已有 `a.txt` 和 `a_1.txt`，新上传 `a.txt` 必须顺延为 `a_2.txt`；
+   - 若用户主动拖入 `a_1.txt` 与已有 `a_1.txt` 冲突，应顺延为 `a_1_1.txt`。
+5. **用 `fs.lstatSync` 判冲突**：必须同时避让普通文件、同名目录以及损坏符号链接（现有代码中的 `fs.existsSync` 对损坏符号链接会返回 `false`，可能误覆盖）。
+
+#### 2.3 上传目标目录的确定
+- 当前后端 Session 的固定起始工作目录为 `/agy`（[`entry.js`](file:///source/build-data/server/entry.js#L34)）。
+- **注意点**：浏览器端并不知道用户在终端内执行 `cd` 后的动态当前目录（Bash/TUI 进程切换目录不会自动同步到前端；即使在 Linux 下试图读 `/proc/<pid>/cwd` 或依赖 OSC 7，在 `agy` CLI 交互模式下也不可靠）。
+- **建议**：默认上传到 `/agy`（并在完成提示中明确显示完整保存路径，或提供一键复制路径按钮方便粘贴使用）。
+
+#### 2.4 Web 终端（[`index.html`](file:///source/build-data/client/index.html) / [`main.js`](file:///source/build-data/client/main.js)）UI 与交互冲突
+1. **区分文件拖拽 vs 文本拖选**：在终端内划词拖拽时也会触发原生 `dragover`/`drop`，必须检查 `e.dataTransfer?.types` 包含 `"Files"`（且 `files.length > 0`），否则不拦截事件，避免破坏终端文本选择体验。
+2. **不占用现有 `#progress-bar` 与终端焦点**：
+   - [`index.html`](file:///source/build-data/client/index.html#L28) 顶部的 `#progress-bar` 已由 OSC 9;4 的 `ProgressAddon` 独占使用，拖拽上传进度不应与之混用，避免互相覆盖状态。
+   - 上传提示与进度不能直接写入 PTY（会打乱 `vim`/`agy` TUI 画面），也不应抢走 `term.focus()`。
+   - 建议做法：拖入时显示全屏半透明 Drop 遮罩（提示目标路径）；松手后在右下角弹出轻量级浮动 Toast 卡片显示进度、最终保存路径（含自动重命名结果）及“取消”按钮，完成后自动淡出。
+3. **防误拖大规模目录/大文件**：若支持文件夹拖拽展开，意外拖入 `node_modules` 等数万小文件会瞬间阻塞请求；需限制并发（如串行或 2 并发）、支持取消（`xhr.abort()` 自动触发服务端清理 `.tmp` 临时文件），并在文件数过多时给出保护限制或提示使用 `/control/upload` 管理页。
+
+#### 2.5 顺带加固 [`server/upload.js`](file:///source/build-data/server/upload.js) 已有隐患
+在修改 [`server/upload.js`](file:///source/build-data/server/upload.js) 时，可一并修复此前审计发现的几个相关细节：
+- 长文件名直接后缀 `.tmp.<ts>_<rand>` 可能超出 255 字节触发 `ENAMETOOLONG`（可改为同目录下短随机临时名）；
+- 对目标路径 `stat` 增加 `try/catch` 保护与 `lstatSync` 判存在，防范悬空符号链接与权限异常未捕。
+
+---
+
+### 3. 待确认的产品细节
+
+如确认开始实现，请明确以下 3 个偏好：
+1. **默认上传目录**：直接放到 `/agy`，还是单独放在 `/agy/uploads`？
+2. **文件夹拖拽**：拖入文件夹时是递归上传（保持相对目录并在目录内对冲突文件自动重命名），还是仅支持文件拖拽（拖入文件夹时提示使用 `/control/upload`）？
+3. **重命名细节**：对于 `a.tar.gz` 这类双扩展名，按最后一个 `.` 处理为 `a.tar_1.gz` 即可，还是需要专门保留 `.tar.gz`/`.tar.xz` 等复合扩展名？
+
+--------------------------------------------------------------------------------
+[Turn 13] Timestamp: 2026-11-13T10:02:54Z (Step: 249)
+--------------------------------------------------------------------------------
+
+USER:
+复合扩展名 filename.extA.extB，应重命名为filename_1.extA.extB，顺便把现有上传覆盖的损坏符号链接问题给修了。暂时不需要UI，静默上传。以这种方式上传的，单次拖动上传文件不能超过100，总大小不超过100M。上传文件直接放在/agy下。支持文件夹拖拽。
+
+ACTIONS / TOOL CALLS:
+  - [Tool: write_file] /source/build-data/server/upload.js
+  - [Tool: edit_file] /source/build-data/server/upload.js
+  - [Tool: read_file] /source/build-data/client/main.js (Lines 400-429)
+  - [Tool: edit_file] /source/build-data/client/main.js
+  - [Tool: edit_file] /source/build-data/client/main.js
+  - [Tool: run_command] `rm -rf /tmp/drop-upload-test && mkdir -p /tmp/drop-upload-test/app /tmp/drop-upload-tes...` (Build and test drop upload & upload.js fixes)
+  - [System: background task 3a6f176d-c3ac-4b5f-98bb-f2e00241eb94/task-260] Command exited with code 1.
+  - [Tool: run_command] `NODE_PATH=/tmp/drop-upload-test/app/node_modules node /tmp/drop-upload-test/run_tests.j...` (Run drop upload and symlink tests with NODE_PATH)
+  - [Tool: run_command] `git -C /source status -s` (Check git status in source)
+  - [Tool: read_file] /source/build-data/server/upload.js (Lines 1-120)
+  - [Tool: read_file] /source/build-data/server/upload.js (Lines 155-260)
+  - [Tool: read_file] /source/build-data/client/main.js (Lines 428-665)
+
+AGENT:
+已修改 [`build-data/server/upload.js`](file:///source/build-data/server/upload.js) 与 [`build-data/client/main.js`](file:///source/build-data/client/main.js)，正在临时目录中执行 `esbuild` 打包验证以及服务端/前端集成测试（涵盖复合扩展名重命名、损坏符号链接防护、并发冲突与单次拖拽 100 文件 / 100MB 上限），稍等片刻即可完成。
+
+已完成 Web 终端无感拖拽上传（直接落盘至 `/agy`、支持文件夹、复合扩展名自动递增重命名）以及服务端损坏符号链接覆盖隐患的修复：
+
+### 修改内容
+
+1. **服务端上传强化与 `?autorename=1` 支持**：[`build-data/server/upload.js`](file:///source/build-data/server/upload.js#L5-L290)
+   - **复合扩展名自动重命名**（[`splitFilenameParts`](file:///source/build-data/server/upload.js#L29-L43)、[`buildRenamedPath`](file:///source/build-data/server/upload.js#L45-L53)、[`commitWithAutoRename`](file:///source/build-data/server/upload.js#L88-L122)）：
+     - 保留前导 `.`（如 `.gitignore` → `.gitignore_1`、`.env.local` → `.env_1.local`），并从索引 1 后的首个 `.` 起完整保留复合扩展名（`filename.extA.extB` → `filename_1.extA.extB` → `filename_2.extA.extB`），无扩展名文件重命名为 `name_1`；
+     - 使用基于 `fs.link` + `fs.unlink` 的 [`moveExclusive`](file:///source/build-data/server/upload.js#L65-L86) 原子占位（遇 `EEXIST` 自动递增序号，不支持硬链接时自动回退检查 + `rename`），消除并发上传同名文件时的覆盖竞态；
+     - 响应 JSON 返回最终保存路径 `path` 与 `renamed` 标记；同时当 `autorename` 启用且路径不以 `/` 结尾时，若目标恰好是已存在的同名目录，会重命名为 `dirname_1` 而不会误写入目录内部。
+   - **修复损坏符号链接与路径处理隐患**：
+     - 将判存在逻辑由 `fs.existsSync` 改为 [`tryLstat`](file:///source/build-data/server/upload.js#L7-L16)（`fs.lstatSync`），避免未开启 `overwrite` 时静默覆盖悬空/损坏符号链接；
+     - 为目录探测 [`tryStat`](file:///source/build-data/server/upload.js#L18-L27) 增加异常保护并拦截 `.` / `..` 非法文件名与目录覆盖；
+     - 临时文件改用短文件名 `.upload.tmp.<ts>_<rand>`（防止超长文件名触发 `ENAMETOOLONG`），并在 `writeStream` 出错时主动 `req.unpipe` + `req.resume`。
+
+2. **Web 终端静默拖拽上传**：[`build-data/client/main.js`](file:///source/build-data/client/main.js#L429-L662)
+   - 在 `window` 捕获阶段监听 `dragenter`、`dragover`、`drop`，通过 [`hasDraggedFiles`](file:///source/build-data/client/main.js#L439-L449) 仅拦截包含文件的拖拽操作（不影响终端内文本拖选）。
+   - 使用 [`captureDropPayload`](file:///source/build-data/client/main.js#L524-L540) 与 [`traverseDropEntry`](file:///source/build-data/client/main.js#L484-L522) 支持多文件与嵌套文件夹递归遍历（保留相对目录结构到 `/agy/<relPath>`），并在遍历期间提前校验单次拖拽限制：**文件数 `<= 100`、总大小 `<= 100 MB`**（超限则整批跳过并在控制台提示，不部分上传）。
+   - 保持静默上传（不改变终端 DOM、不输出弹窗 UI、不向 PTY 写入内容），经由队列 [`dropUploadQueue`](file:///source/build-data/client/main.js#L437) 串行调用 `PUT /control/upload?path=...&autorename=1` 后台完成传输。
+
+### 验证结果
+已在独立临时测试目录完成全量构建与功能验证（完成后已清理临时目录）：
+- **`esbuild` 打包校验**：按 [`Dockerfile`](file:///source/Dockerfile#L14) 方式使用 `npx esbuild main.js --minify` 成功打包（`10.3kb`）。
+- **服务端 HTTP 集成测试**（[`server/upload.js`](file:///source/build-data/server/upload.js)）：
+  - `filename.extA.extB` 连续上传自动生成 `filename_1.extA.extB`、`filename_2.extA.extB`；
+  - `.gitignore` / `.env.local` / `README` 自动重命名符合预期；
+  - 损坏符号链接在默认模式下返回 `409 Conflict` 且原符号链接保持完好，`autorename=1` 时生成 `broken_link_1`，`overwrite=1` 时正常替换；
+  - 同名已存在目录冲突时自动保存为 `mydir_1`，5 个并发 `race.tar.gz` 请求无冲突全部成功落盘，244 字节长文件名正常上传无 `ENAMETOOLONG`。
+- **前端拖拽逻辑仿真测试**（[`client/main.js`](file:///source/build-data/client/main.js)）：
+  - 纯文本拖拽不触发 `preventDefault()` 与上传；
+  - 文件夹 + 文件混合拖拽正确映射 `/agy/proj/sub/a.tar.gz`、`autorename=1`；
+  - `100` 个文件与恰好 `100 MB` 允许上传；`101` 个文件与 `100 MB + 1 B` 整批拦截跳过（`ALL DROP UPLOAD & SYMLINK FIX TESTS PASSED`）。
+- 注：实际部署生效需重新构建 Docker 镜像打包前端资源。
+
+--------------------------------------------------------------------------------
+[Turn 14] Timestamp: 2026-11-13T10:09:11Z (Step: 271)
+--------------------------------------------------------------------------------
+
+USER:
+将本次对话存档到.agent_worklog/下
+
+ACTIONS / TOOL CALLS:
+  - [Tool: read_file] /source/.agent_worklog/20261016024652.log (Lines 1-70)
+  - [Tool: read_file] /source/.agent_worklog/20261016034737.log (Lines 280-335)
+  - [Tool: run_command] `ls -lh /root/.gemini/antigravity-cli/brain/3a6f176d-c3ac-4b5f-98bb-f2e00241eb94/.system...` (Inspect worklog format and conversation transcript)
+  - [Tool: read_file] /root/.gemini/antigravity-cli/brain/c7804ce0-d279-4f2f-a3e4-00825f43425f/scratch/generate_worklog.py
+  - [Tool: read_file] /source/.agent_worklog/20261016024652.log (Lines 70-170)
+  - [Tool: run_command] `python3 -c ' import json path = "/root/.gemini/antigravity-cli/brain/3a6f176d-c3ac-4b5f...` (Inspect transcript_full.jsonl step structure)
+  - [Tool: run_command] `python3 -c ' import json path = "/root/.gemini/antigravity-cli/brain/3a6f176d-c3ac-4b5f...` (Inspect ask_question and tool call structures in transcript)
+  - [Tool: run_command] `python3 -c ' import json path = "/root/.gemini/antigravity-cli/brain/3a6f176d-c3ac-4b5f...` (Inspect ask_question response step in transcript)
+  - [Tool: write_file] /root/.gemini/antigravity-cli/brain/3a6f176d-c3ac-4b5f-98bb-f2e00241eb94/scratch/generate_worklog.py
+  - [Tool: run_command] `python3 /root/.gemini/antigravity-cli/brain/3a6f176d-c3ac-4b5f-98bb-f2e00241eb94/scratc...` (Generate worklog and check git status)
+
+AGENT:
+(Recording conversation to agent_worklog)
